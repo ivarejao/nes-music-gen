@@ -26,9 +26,9 @@ README.md generated successfully.
 ```text
 ├── data/               # Datasets, text-prompt pairings, and preprocessed audio/MIDI/NLM files
 ├── src/
-│   ├── text_to_audio/  # Modules for the direct text-to-audio baseline
-│   ├── text_to_midi/   # Modules for text-to-MIDI conversion and MIDI synthesis
-│   └── text_to_nlm/    # Modules for NLM parsing, text-to-NLM models, and NLM rendering
+│   ├── audio/  # Modules for the direct text-to-audio baseline
+│   ├── midi/   # Modules for text-to-MIDI conversion and MIDI synthesis
+│   └── nlm/    # Modules for NLM parsing, text-to-NLM models, and NLM rendering
 ├── models/             # Model checkpoints and architecture configurations
 ├── notebooks/          # Exploratory data analysis and synthesis demonstrations
 ├── requirements.txt    # Python dependencies
