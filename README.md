@@ -37,5 +37,5 @@ README.md generated successfully.
 ## Authors
 - Igor Varejão
 - Felipe Marra
-- João Santanna
+- João Santana
 - Lucas Ferreira Nascimento
