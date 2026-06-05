@@ -19,10 +19,6 @@ We explore three distinct pipelines for converting textual prompts into NES-comp
 
 ## Repository Structure
 
-Saída de código
-
-README.md generated successfully.
-
 ```text
 ├── data/               # Datasets, text-prompt pairings, and preprocessed audio/MIDI/NLM files
 ├── src/
@@ -33,7 +29,7 @@ README.md generated successfully.
 ├── notebooks/          # Exploratory data analysis and synthesis demonstrations
 ├── requirements.txt    # Python dependencies
 └── README.md           # Project documentation
-
+```
 ## Authors
 - Igor Varejão
 - Felipe Marra
