@@ -4,12 +4,12 @@ from tokenizers import Tokenizer, models, trainers, pre_tokenizers
 
 def bpe_training():
     root = Path(__file__).resolve().parent.parent.parent
-    pasta_treino_pkl = root / "data" / "nesmdb_nlm" / "train"
+    path_train_pkl = root / "data" / "nesmdb_nlm" / "train"
     path_bpe = root / "models" / "tokenizers" / "lmf_bpe_373_tokenizer.json"
     pasta_temp_txt = root / "data" / "temp_bpe_corpus"
     
-    arquivos_pkl = list(pasta_treino_pkl.glob("*.pkl"))
-    if not arquivos_pkl:
+    files_pkl = list(path_train_pkl.glob("*.pkl"))
+    if not files_pkl:
         print("")
         return
     
@@ -17,11 +17,11 @@ def bpe_training():
     corpus_path = pasta_temp_txt / "lmf_corpus_raw.txt"
     
     with open(corpus_path, 'w', encoding='utf-8') as f_out:
-        for arquivo in arquivos_pkl:
-            with open(arquivo, 'rb') as f_in:
-                dados_nlm = pickle.load(f_in)
-                linha = " ".join([f"{cmd[0]}_{cmd[1]}" for cmd in dados_nlm])
-                f_out.write(linha + "\n")
+        for file in files_pkl:
+            with open(file, 'rb') as f_in:
+                data_nlm = pickle.load(f_in)
+                line = " ".join([f"{cmd[0]}_{cmd[1]}" for cmd in data_nlm])
+                f_out.write(line + "\n")
     
     tokenizer = Tokenizer(models.BPE(unk_token="<UNK>"))
     
