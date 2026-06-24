@@ -3,14 +3,10 @@ import math
 import logging
 import json
 
-from itertools import islice
-
 import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LambdaLR
 
-from any2music.audio.decoders.musicgen import DelayProvider
-from any2music.text.encoders import T5Conditioner
 from any2music.audio.tokenizers import DACCompressionModel
 from any2music.audio.decoders.musicgen import MusicGenTransformer, MusicGenSize
 
@@ -170,8 +166,6 @@ def train_audio(
         bos_token_id = dac.bos_token_id,
         model_size = decoder_size
     ).cuda()
-
-    t5 = T5Conditioner('t5-base', model.size_params.d_model, device='cpu').eval()
 
     # Get dataloader
     train_dataset = NESDataset(
