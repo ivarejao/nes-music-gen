@@ -44,22 +44,10 @@ class NESDataset(Dataset):
         row = self.df.loc[index].to_dict()
         file_name_prefix = row["file_name_prefix"]
         wav_path = os.path.join(self.dataset_root, row["file_path_wav"])
-        desc_file_path = os.path.join(self.dataset_root, row["file_path_music_track_description"])
+        pre_comp_path = wav_path[:-4] + '_pre_comp.pt'
 
-        desc_tags = [f"game: {row['file_game_name']}", f"track name: {row['track_name']}", f"game genre: {str(row['genre_wiki']).strip('[]')}", f"{row['genre_cluster']}", f"bpm: {row['tempo_bpm']}"]
-        random.shuffle(desc_tags)
-        desc_tags = ", ".join(desc_tags)
+        pre_comp = torch.load(pre_comp_path, map_location='cpu')
+        pre_comp['file_name_prefix'] = file_name_prefix
 
-        # Get text tokens
-        with open(desc_file_path, 'r') as f:
-            file_txt = f.read()
-            with torch.no_grad():
-                description = desc_tags + file_txt.strip()
-                logger.debug(f"Audio description: {description}")
-
-        return {
-            'file_name_prefix': file_name_prefix,
-            'description': description, 
-            'wav_path': wav_path
-        }
+        return pre_comp
 

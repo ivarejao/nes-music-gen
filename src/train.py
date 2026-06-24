@@ -12,7 +12,7 @@ if __name__ == "__main__":
         dataset_root = DATASET_ROOT,
         epochs = 100,
         warmup_steps = 100,
-        audio_length = 60,
+        audio_secs = 60,
         decoder_size = MusicGenSize.SMALL,
         checkpoint_every = 5,
         generate_amount = 5

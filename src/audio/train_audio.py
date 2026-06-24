@@ -2,13 +2,12 @@ import os
 import math
 import logging
 import json
-from functools import partial
+
+from itertools import islice
 
 import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LambdaLR
-
-from audiotools import AudioSignal
 
 from any2music.audio.decoders.musicgen import DelayProvider
 from any2music.text.encoders import T5Conditioner
@@ -55,68 +54,25 @@ def get_cosine_with_warmup_scheduler(optimizer, num_warmup_steps, num_training_s
     return LambdaLR(optimizer, lr_lambda)
 
 
-def tokenize_audio(file_path_wav:str, audio_secs:int, audio_tokenizer):
-    max_audio_len = audio_tokenizer.sample_rate*audio_secs
-    max_audio_tokens = int(audio_tokenizer.frame_rate*audio_secs)
-
-    # Keep preprocessing on CPU so dataloader workers can safely serialize results.
-    audio_tensor = AudioSignal(file_path_wav, device='cpu').to_mono()[:, :, :max_audio_len]
-
-    # Tokenize the audio
-    with torch.inference_mode():
-        encoded_audio, meta = audio_tokenizer.encode(audio_tensor)
-
-        # Add padding so we don't loose the first token for the delay
-        B, K, S = encoded_audio.shape
-        padding = torch.full((B, K, 1), audio_tokenizer.pad_token_id, dtype=torch.long)
-        # Add 
-        if S < max_audio_tokens:
-            final_padding = padding.expand((-1, -1, max_audio_tokens -( S + 1))) # +1 for the padding token
-            encoded_audio = torch.cat([padding, encoded_audio, final_padding], dim=-1)
-        else:
-            encoded_audio = torch.cat([padding, encoded_audio], dim=-1)[:, :, :max_audio_tokens]
-
-        # Apply the delay pattern for MusicGen
-        # This shifts codebook 1 by 0, codebook 2 by 1, codebook 3 by 2, etc.
-        delayed_audio, _ = DelayProvider.build_delay_pattern_mask(
-            input_ids=encoded_audio,
-            pad_token_id=audio_tokenizer.pad_token_id,
-            max_length=encoded_audio.shape[-1] + audio_tokenizer.num_codebooks,
-            audio_channels=1
-        )
-
-        input_tokens = delayed_audio[:, :, :-1].detach()
-        target_tokens = delayed_audio[:, :, 1:].detach()
-
-    return input_tokens, target_tokens, meta
-
-
-def collate_fn(batch, text_tokenizer, audio_secs, audio_tokenizer):
+def collate(batch):
     input_tokens_batch = []
     target_tokens_batch = []
     meta_batch = []
-    description_batch = []
+    txt_tokens_batch = []
     file_name_prefix_batch = []
 
     for example in batch:
-        input_tokens, target_tokens, meta = tokenize_audio(example['wav_path'], audio_secs, audio_tokenizer)
-        input_tokens_batch.append(input_tokens)
-        target_tokens_batch.append(target_tokens)
-        meta_batch.append(meta)
-
-        description_batch.append(example['description'])
-
+        input_tokens_batch.append(example['input_tokens'])
+        target_tokens_batch.append(example['target_tokens'])
+        meta_batch.append(example['meta'])
+        txt_tokens_batch.append(example['txt_tokens'])
         file_name_prefix_batch.append(example['file_name_prefix'])
 
-    input_tokens_batch = torch.cat(input_tokens_batch, dim=0)
-    target_tokens_batch = torch.cat(target_tokens_batch, dim=0)
-
-    txt_tokens_batch = text_tokenizer.tokenize(description_batch)
-    txt_tokens_batch, _ = text_tokenizer(txt_tokens_batch)
-    txt_tokens_batch = txt_tokens_batch.to(torch.bfloat16).detach()
+    input_tokens_batch = torch.stack(input_tokens_batch)
+    target_tokens_batch = torch.stack(target_tokens_batch)
+    txt_tokens_batch = torch.stack(txt_tokens_batch)
 
     return file_name_prefix_batch, input_tokens_batch, target_tokens_batch, meta_batch, txt_tokens_batch
-
 
 def save_loss_history(xp_folder, train_losses, test_losses):
     loss_path = os.path.join(xp_folder, "losses.json")
@@ -154,13 +110,45 @@ def evaluate_model_loss(model, dataloader, criterion):
     return loss
 
 
+def run_generation_test(test_dataloader, model, audio_tokenizer, generation_folder):
+    model.eval()
+    iter_loader = iter(test_dataloader)
+    batch = next(iter_loader)
+    file_name_prefix, _, _, meta, txt_tokens = batch
+
+    for i in range(len(file_name_prefix)):
+        conditioner = txt_tokens[i].unsqueeze(0).cuda()
+
+        # Run generation
+        with torch.inference_mode():
+            logger.info(f"Generating audio tokens for {file_name_prefix[i]}...")
+            audio_tokens = model.generate(
+                max_new_tokens=model.max_seq_len,
+                src=conditioner,
+                temperature=1, # < 1 -> eliminate randomness | = 1 -> the distribution learned | > 1 -> aproximate a uniform distribution
+                top_k=250
+            )
+
+            print(f"Generate audio codes shape: {audio_tokens.shape}\n")
+
+            # Decode back to audio
+            total_generated_samples = audio_tokens.shape[-1] * audio_tokenizer.model.hop_length
+            meta[i]['original_length'] = min(meta[i]['original_length'], total_generated_samples)
+            decoded_audio = audio_tokenizer.decode(audio_tokens.cpu(), meta[i])
+
+            logger.info(f"Decoded audio shape: {decoded_audio.shape}")
+            path = os.path.join(generation_folder, file_name_prefix[i]+'.wav')
+            decoded_audio.write(path)
+
+    model.train()
+
+
 def train_audio(
         dataset_root:str, 
         epochs:int, 
-        warmup_steps:int, 
-        audio_length:int,
+        warmup_steps:int,
         decoder_size:MusicGenSize,
-        checkpoint_every:int = 5,
+        checkpoint_every:int = 10,
         generate_amount:int = 5,
         audio_secs:int=60,
         xp_dir = './'
@@ -176,22 +164,16 @@ def train_audio(
     model = MusicGenTransformer(
         vocab_size = dac.vocab_size,
         frame_rate = int(dac.frame_rate),
-        audio_duration = audio_length,
+        audio_duration = audio_secs,
         pad_token_id = dac.pad_token_id,
         eos_token_id = dac.eos_token_id,
+        bos_token_id = dac.bos_token_id,
         model_size = decoder_size
     ).cuda()
 
     t5 = T5Conditioner('t5-base', model.size_params.d_model, device='cpu').eval()
 
     # Get dataloader
-    collate = partial(
-        collate_fn, 
-        text_tokenizer=t5, 
-        audio_secs=audio_secs, 
-        audio_tokenizer=dac
-    )
-    
     train_dataset = NESDataset(
         dataset_root=dataset_root, 
         split="train",
@@ -233,7 +215,7 @@ def train_audio(
     for epoch in range(epochs):
         if not model.training: model.train()
 
-        epoch_loss = []
+        epoch_losses = []
         for update, batch in enumerate(train_dataloader):
             _, input_tokens, target_tokens, _, txt_tokens = batch
 
@@ -253,13 +235,13 @@ def train_audio(
             loss = criterium(flat_logits, flat_targets)
             loss_item = loss.item()
             logger.info(f"Epoch {epoch} -> Update {update} | Loss: {loss_item:.4f}")
-            epoch_loss.append(loss_item)
+            epoch_losses.append(loss_item)
 
             loss.backward()
             optim.step()
             scheduler.step()
 
-        epoch_loss = torch.stack(epoch_loss).mean().item()
+        epoch_loss = sum(epoch_losses) / len(epoch_losses)
         train_losses.append(epoch_loss)
 
         test_loss = evaluate_model_loss(model, test_dataloader, criterium)
@@ -269,40 +251,7 @@ def train_audio(
         logger.info(f"Epoch {epoch} Train Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f}")
 
         if epoch % checkpoint_every == 0:
-            run_generation_test(generate_amount, test_dataloader, model, dac, generation_folder)
+        #     run_generation_test(test_dataloader, model, dac, generation_folder)
 
-        ckpt_path = os.path.join(checkpoint_folder, f'checkpoint_{epoch}.pth')
-        model.save(ckpt_path)
-
-
-def run_generation_test(generate_amount, test_dataloader, model, audio_tokenizer, generation_folder):
-    model.eval()
-    iter_loader = iter(test_dataloader)
-
-    for _ in range(generate_amount):
-        batch = next(iter_loader)
-        file_name_prefix, _, _, meta, txt_tokens = batch
-
-        txt_tokens = txt_tokens.cuda()
-
-        # Run generation
-        with torch.inference_mode():
-            logger.info(f"Generating audio tokens for {file_name_prefix}...")
-            audio_tokens = model.generate(
-                src=txt_tokens,
-                temperature=1e-4, # < 1 -> eliminate randomness | = 1 -> the distribution learned | > 1 -> aproximate a uniform distribution
-                top_k=1
-            )
-
-            print(f"Generate audio codes shape: {audio_tokens.shape}\n")
-
-            # Decode back to audio
-            total_generated_samples = audio_tokens.shape[-1] * audio_tokenizer.model.hop_length
-            meta['original_length'] = min(meta['original_length'], total_generated_samples)
-            decoded_audio = audio_tokenizer.decode(audio_tokens.cpu(), meta)
-
-            logger.info(f"Decoded audio shape: {decoded_audio.shape}")
-            path = os.path.join(generation_folder, file_name_prefix+'.wav')
-            decoded_audio.write(path)
-
-    model.train()
+            ckpt_path = os.path.join(checkpoint_folder, f'checkpoint_{epoch}.pth')
+            torch.save(model, ckpt_path)
