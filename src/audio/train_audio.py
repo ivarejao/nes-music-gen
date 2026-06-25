@@ -248,4 +248,4 @@ def train_audio(
         #     run_generation_test(test_dataloader, model, dac, generation_folder)
 
             ckpt_path = os.path.join(checkpoint_folder, f'checkpoint_{epoch}.pth')
-            torch.save(model, ckpt_path)
+            torch.save(model.state_dict(), ckpt_path)
