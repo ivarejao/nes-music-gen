@@ -2,6 +2,7 @@ import os
 import math
 import logging
 import json
+import random
 
 import torch
 from torch.utils.data import DataLoader
@@ -15,7 +16,7 @@ from src.dataset.dataset import NESDataset
 logger = logging.getLogger(__name__)
 
 def instantiate_xp(xp_dir):
-    xp_folder = os.path.join(xp_dir, "my_xp")
+    xp_folder = os.path.join(xp_dir, "my_xp_cfg")
     checkpoint_folder = os.path.join(xp_folder, "checkpoints")
     generation_folder = os.path.join(xp_folder, "generation_tests")
 
@@ -205,7 +206,7 @@ def train_audio(
 
     # Train
     criterium = torch.nn.CrossEntropyLoss(ignore_index=model.pad_token_id) # Ignore the padding tokens in the loss calculation
-    optim = torch.optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.95), weight_decay=0.1)
+    optim = torch.optim.AdamW(model.parameters(), lr=5e-4, betas=(0.9, 0.95), weight_decay=0.1)
     scheduler =  get_cosine_with_warmup_scheduler(optim, warmup_steps, epochs*len(train_dataloader))
 
     train_losses = []
@@ -219,11 +220,18 @@ def train_audio(
             _, input_tokens, target_tokens, _, txt_tokens, txt_tokens_mask = batch
 
             input_tokens = input_tokens.cuda()
-            txt_tokens = txt_tokens.cuda()
-            txt_tokens_mask = txt_tokens_mask.cuda()
-    
+
+            if random.random() < 0.3:
+                drop_conditioning = True
+                txt_tokens = None
+                txt_tokens_mask = None
+            else:
+                drop_conditioning = False
+                txt_tokens = txt_tokens.cuda()
+                txt_tokens_mask = txt_tokens_mask.cuda()
+
             optim.zero_grad()
-            logits = model(src=txt_tokens, src_mask=txt_tokens_mask, tgt=input_tokens)
+            logits = model(src=txt_tokens, src_mask=txt_tokens_mask, tgt=input_tokens, drop_conditioning=drop_conditioning)
 
             # Reshape for CrossEntropyLoss
             # Logits: (B, K, S, Vocab) -> (B * K * S, Vocab)
