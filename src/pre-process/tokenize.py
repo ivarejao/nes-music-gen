@@ -92,24 +92,27 @@ def tokenize(
         # Tokenize audio
         input_tokens, target_tokens, meta = tokenize_audio(wav_path, audio_secs, dac)
 
-        # Tokenize text
-
-        desc_tags = [f"game: {row['file_game_name']}", f"track name: {row['track_name']}", f"game genre: {str(row['genre_wiki']).strip('[]')}", f"{row['genre_cluster']}", f"bpm: {row['tempo_bpm']}"]
-        random.shuffle(desc_tags)
-        desc_tags = ", ".join(desc_tags)
-
         # Get text tokens
         with open(desc_file_path, 'r') as f:
             file_txt = f.read()
-            description = desc_tags + file_txt.strip()
-            logger.debug(f"Audio description: {description}")
 
-        txt_tokens = t5.tokenize([description])
-        txt_tokens, _ = t5(txt_tokens)
+        desc_tags = file_txt.split(',')
+        random.shuffle(desc_tags)
+        desc_tags = [tag.strip() for tag in desc_tags]
+        desc_tags = ", ".join(desc_tags)
+        logger.debug(f"Audio description: {desc_tags}")
+
+        txt_tokens = t5.tokenize([desc_tags])
+        txt_tokens, txt_tokens_mask = t5(txt_tokens)
+
         txt_tokens = txt_tokens.to(torch.bfloat16).cpu().contiguous().squeeze(0).detach()
+        txt_tokens_mask = txt_tokens_mask.bool().cpu().contiguous().squeeze(0).detach()
+
+        logger.debug(f"txt_tokens_mask {txt_tokens_mask.shape}\n{txt_tokens_mask}\n")
 
         save_dict = {
             'txt_tokens': txt_tokens,
+            'txt_tokens_mask': txt_tokens_mask,
             'input_tokens': input_tokens,
             'target_tokens': target_tokens,
             'meta': meta

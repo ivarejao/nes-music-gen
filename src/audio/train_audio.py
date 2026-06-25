@@ -55,6 +55,7 @@ def collate(batch):
     target_tokens_batch = []
     meta_batch = []
     txt_tokens_batch = []
+    txt_tokens_mask_batch = []
     file_name_prefix_batch = []
 
     for example in batch:
@@ -62,13 +63,15 @@ def collate(batch):
         target_tokens_batch.append(example['target_tokens'])
         meta_batch.append(example['meta'])
         txt_tokens_batch.append(example['txt_tokens'])
+        txt_tokens_mask_batch.append(example['txt_tokens_mask'])
         file_name_prefix_batch.append(example['file_name_prefix'])
 
     input_tokens_batch = torch.stack(input_tokens_batch)
     target_tokens_batch = torch.stack(target_tokens_batch)
     txt_tokens_batch = torch.stack(txt_tokens_batch)
+    txt_tokens_mask_batch = torch.stack(txt_tokens_mask_batch)
 
-    return file_name_prefix_batch, input_tokens_batch, target_tokens_batch, meta_batch, txt_tokens_batch
+    return file_name_prefix_batch, input_tokens_batch, target_tokens_batch, meta_batch, txt_tokens_batch, txt_tokens_mask_batch
 
 def save_loss_history(xp_folder, train_losses, test_losses):
     loss_path = os.path.join(xp_folder, "losses.json")
@@ -89,12 +92,13 @@ def evaluate_model_loss(model, dataloader, criterion):
 
     with torch.inference_mode():
         for batch in dataloader:
-            _, input_tokens, target_tokens, _, txt_tokens = batch
+            _, input_tokens, target_tokens, _, txt_tokens, txt_tokens_mask  = batch
 
             input_tokens = input_tokens.cuda()
             txt_tokens = txt_tokens.cuda()
+            txt_tokens_mask = txt_tokens_mask.cuda()
 
-            logits = model(src=txt_tokens, tgt=input_tokens)
+            logits = model(src=txt_tokens, tgt=input_tokens, src_mask=txt_tokens_mask)
             flat_logits = logits.reshape(-1, model.vocab_size)
             flat_targets = target_tokens.cuda().reshape(-1)
 
@@ -110,10 +114,11 @@ def run_generation_test(test_dataloader, model, audio_tokenizer, generation_fold
     model.eval()
     iter_loader = iter(test_dataloader)
     batch = next(iter_loader)
-    file_name_prefix, _, _, meta, txt_tokens = batch
+    file_name_prefix, _, _, meta, txt_tokens, txt_tokens_mask = batch
 
     for i in range(len(file_name_prefix)):
         conditioner = txt_tokens[i].unsqueeze(0).cuda()
+        conditioner_mask = txt_tokens_mask[i].unsqueeze(0).cuda()
 
         # Run generation
         with torch.inference_mode():
@@ -121,6 +126,7 @@ def run_generation_test(test_dataloader, model, audio_tokenizer, generation_fold
             audio_tokens = model.generate(
                 max_new_tokens=model.max_seq_len,
                 src=conditioner,
+                src_mask=conditioner_mask,
                 temperature=1, # < 1 -> eliminate randomness | = 1 -> the distribution learned | > 1 -> aproximate a uniform distribution
                 top_k=250
             )
@@ -145,7 +151,6 @@ def train_audio(
         warmup_steps:int,
         decoder_size:MusicGenSize,
         checkpoint_every:int = 10,
-        generate_amount:int = 5,
         audio_secs:int=60,
         xp_dir = './'
     ):
@@ -211,13 +216,14 @@ def train_audio(
 
         epoch_losses = []
         for update, batch in enumerate(train_dataloader):
-            _, input_tokens, target_tokens, _, txt_tokens = batch
+            _, input_tokens, target_tokens, _, txt_tokens, txt_tokens_mask = batch
 
             input_tokens = input_tokens.cuda()
             txt_tokens = txt_tokens.cuda()
+            txt_tokens_mask = txt_tokens_mask.cuda()
     
             optim.zero_grad()
-            logits = model(src=txt_tokens, tgt=input_tokens)
+            logits = model(src=txt_tokens, src_mask=txt_tokens_mask, tgt=input_tokens)
 
             # Reshape for CrossEntropyLoss
             # Logits: (B, K, S, Vocab) -> (B * K * S, Vocab)
