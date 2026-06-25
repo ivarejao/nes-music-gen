@@ -33,7 +33,7 @@ def tokenize_audio(file_path_wav:str, audio_secs:int, audio_tokenizer):
         # Add special tokens
         B, K, S = encoded_audio.shape
 
-        bos = torch.full((B, K, 1), audio_tokenizer.eos_token_id, dtype=torch.long, device='cuda')
+        bos = torch.full((B, K, 1), audio_tokenizer.bos_token_id, dtype=torch.long, device='cuda')
         eos = torch.full((B, K, 1), audio_tokenizer.eos_token_id, dtype=torch.long, device='cuda')
         padding = torch.full((B, K, 1), audio_tokenizer.pad_token_id, dtype=torch.long, device='cuda')
 
