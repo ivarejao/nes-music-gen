@@ -6,11 +6,11 @@ from tokenizers.decoders import ByteLevel as ByteLevelDecoder
 
 
 def reconstruct_complete_dataset():
-    project_root = Path(__file__).resolve().parent.parent.parent
+    project_root = Path("/home/igor/Desktop/Repos/nes-music-gen")
     base_tokens_folder = project_root / "data" / "nlm_tokens_bpe_373"
     
 
-    base_output_folder = project_root / "data" / "generated_nlm"
+    base_output_folder = project_root / "data" / "generated_nlm_v1"
     bpe_path = project_root / "models" / "tokenizers" / "lmf_bpe_373_tokenizer.json"
 
 

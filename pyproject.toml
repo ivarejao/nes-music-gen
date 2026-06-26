@@ -1,0 +1,10 @@
+[project]
+name = "nes-music-gen"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10.12, <3.14"
+dependencies = [
+    "miditok>=3.0.6.post1",
+    "pandas>=2.3.3",
+]
