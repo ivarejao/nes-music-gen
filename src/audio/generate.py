@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 DATASET_ROOT = "/home/es119256/dados/datasets/nes_dataset"
 
 def get_xp(xp_dir):
-    xp_folder = os.path.join(xp_dir, "my_xp")
+    xp_folder = os.path.join(xp_dir, "my_xp_cfg")
     checkpoint_folder = os.path.join(xp_folder, "checkpoints")
     generation_folder = os.path.join(xp_folder, "generation_tests")
 
@@ -111,7 +111,7 @@ def generate(
                 max_new_tokens=model.max_seq_len,
                 src=conditioner,
                 temperature=1, # < 1 -> eliminate randomness | = 1 -> the distribution learned | > 1 -> aproximate a uniform distribution
-                top_k=250
+                top_k=10
             )
 
             print(f"Generate audio codes shape: {audio_tokens.shape}\n")
@@ -138,6 +138,6 @@ if __name__ == "__main__":
 
     generate(
         dataset_root=DATASET_ROOT,
-        epoch=25,
+        epoch=30,
         decoder_size=MusicGenSize.SMALL
     )

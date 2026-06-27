@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from any2music.audio.tokenizers import DACCompressionModel
 from any2music.audio.decoders.musicgen import MusicGenTransformer, MusicGenSize
 
-from src.dataset.dataset import NESDataset
+from src.dataset.dataset import NESAudioDataset
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +174,7 @@ def train_audio(
     ).cuda()
 
     # Get dataloader
-    train_dataset = NESDataset(
+    train_dataset = NESAudioDataset(
         dataset_root=dataset_root, 
         split="train",
         num_codebooks=model.num_codebooks,
@@ -189,7 +189,7 @@ def train_audio(
         collate_fn=collate,
     )
 
-    test_dataset = NESDataset(
+    test_dataset = NESAudioDataset(
         dataset_root=dataset_root, 
         split="test",
         num_codebooks=model.num_codebooks,

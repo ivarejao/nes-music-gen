@@ -1,1 +1,1 @@
-from .dataset import NESDataset
+from .dataset import NESAudioDataset, NESMidiDataset
