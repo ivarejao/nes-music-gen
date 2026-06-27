@@ -225,3 +225,4 @@ cmd/
 *.err
 *.json
 *.pth
+*.wav
