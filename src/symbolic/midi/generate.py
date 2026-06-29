@@ -162,6 +162,6 @@ if __name__ == "__main__":
 
     generate(
         dataset_root=DATASET_ROOT,
-        epoch=10,
+        epoch=50,
         decoder_size=TextGenSize.SMALL
     )

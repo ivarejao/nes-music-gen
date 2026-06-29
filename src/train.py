@@ -2,7 +2,7 @@ import logging
 from any2music.audio.decoders.musicgen import MusicGenSize
 
 from src.audio import train_audio
-from src.midi import train_midi
+from src.symbolic import train_symbolic, SYMBOLIC_TYPE
 
 logging.basicConfig(level=logging.INFO)
 
@@ -18,7 +18,17 @@ if __name__ == "__main__":
     #     checkpoint_every = 5
     # )
 
-    train_midi(
+    # train_symbolic(
+    #     type = SYMBOLIC_TYPE.MIDI,
+    #     dataset_root = DATASET_ROOT,
+    #     epochs = 100,
+    #     warmup_steps = 350,
+    #     decoder_size = MusicGenSize.SMALL,
+    #     checkpoint_every = 5
+    # )
+
+    train_symbolic(
+        type = SYMBOLIC_TYPE.NLM,
         dataset_root = DATASET_ROOT,
         epochs = 100,
         warmup_steps = 350,

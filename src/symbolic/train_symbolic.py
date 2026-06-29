@@ -3,6 +3,7 @@ import math
 import logging
 import json
 import random
+from enum import Enum
 
 import torch
 from torch.utils.data import DataLoader
@@ -10,16 +11,18 @@ from torch.optim.lr_scheduler import LambdaLR
 
 from any2music.text.decoders.textgen import TextGenTransformer, TextGenSize
 
-from src.dataset.dataset import NESMidiDataset
-
 PADDING_TKN = 0
 BOS_TKN = 1
 EOS_TKN = 2
 
+class SYMBOLIC_TYPE(Enum):
+    MIDI = "midi"
+    NLM = "nlm"
+
 logger = logging.getLogger(__name__)
 
-def instantiate_xp(xp_dir):
-    xp_folder = os.path.join(xp_dir, "my_xp_cfg_midi")
+def instantiate_xp(xp_dir, type:SYMBOLIC_TYPE):
+    xp_folder = os.path.join(xp_dir, f"my_xp_cfg_{type.value}")
     checkpoint_folder = os.path.join(xp_folder, "checkpoints")
     generation_folder = os.path.join(xp_folder, "generation_tests")
 
@@ -148,7 +151,7 @@ def run_generation_test(test_dataloader, model, generation_folder):
         # Run generation
         with torch.inference_mode():
             logger.info(f"Generating audio tokens for {file_name_prefix[i]}...")
-            midi_tokens = model.generate(
+            tokens = model.generate(
                 max_new_tokens=model.max_seq_len,
                 src=conditioner,
                 src_mask=conditioner_mask,
@@ -156,18 +159,19 @@ def run_generation_test(test_dataloader, model, generation_folder):
                 top_k=250
             )
 
-            print(f"Generate audio codes shape: {midi_tokens.shape}\n")
+            print(f"Generated tokens of shape: {tokens.shape}\n")
 
             # Decode back to audio
             path = os.path.join(generation_folder, file_name_prefix[i]+'.json')
-            midi_tokens = midi_tokens.detach().cpu()
+            tokens = tokens.detach().cpu()
             with open(path, 'w') as f:
-                json.dump(midi_tokens.tolist(), f)
+                json.dump(tokens.tolist(), f)
 
     model.train()
 
 
-def train_midi(
+def train_symbolic(
+        type:SYMBOLIC_TYPE,
         dataset_root:str, 
         epochs:int, 
         warmup_steps:int,
@@ -176,8 +180,15 @@ def train_midi(
         xp_dir = './'
     ):
 
+    if type == SYMBOLIC_TYPE.MIDI:
+        from src.dataset.dataset import NESMidiDataset as NESSymbDataset
+    elif type == SYMBOLIC_TYPE.NLM:
+        from src.dataset.dataset import NESNlmDataset as NESSymbDataset
+    else:
+        raise TypeError("Invalid train_symbolic type")
+
     # Instanciate xp
-    xp_folder, checkpoint_folder, generation_folder = instantiate_xp(xp_dir)
+    xp_folder, checkpoint_folder, generation_folder = instantiate_xp(xp_dir, type)
 
     # Get models
     model = TextGenTransformer(
@@ -185,12 +196,12 @@ def train_midi(
         pad_token_id = PADDING_TKN,
         bos_token_id = BOS_TKN,
         eos_token_id = EOS_TKN,
-        max_seq_len = 10_000,
+        max_seq_len = 6_000,
         model_size = decoder_size
     ).cuda()
 
     # Get dataloader
-    train_dataset = NESMidiDataset(
+    train_dataset = NESSymbDataset(
         dataset_root=dataset_root, 
         split="train"
     )
@@ -203,7 +214,7 @@ def train_midi(
         collate_fn=collate,
     )
 
-    test_dataset = NESMidiDataset(
+    test_dataset = NESSymbDataset(
         dataset_root=dataset_root, 
         split="test"
     )
