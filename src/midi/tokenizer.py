@@ -1,7 +1,6 @@
 from miditok import MMM, TokenizerConfig
 from pathlib import Path
 import numpy as np
-import logging
 from argparse import Namespace, ArgumentParser
 from src.utils import setup_logger
 from symusic.factory import Score

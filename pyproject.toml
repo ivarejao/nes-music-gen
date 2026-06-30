@@ -12,6 +12,7 @@ dependencies = [
     "miditok>=3.0.6.post1",
     "pandas>=2.3.3",
     "requests>=2.34.2",
+    "tokenizers==0.23.1",
 ]
 
 [tool.setuptools]
