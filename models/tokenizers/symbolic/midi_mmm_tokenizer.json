@@ -1,8 +1,8 @@
 {
     "config": {
         "pitch_range": [
-            33,
-            107
+            0,
+            127
         ],
         "beat_res": {
             "0_1": 8,
@@ -156,7 +156,7 @@
         "use_chords": false,
         "use_rests": false,
         "use_tempos": true,
-        "use_time_signatures": false,
+        "use_time_signatures": true,
         "use_sustain_pedals": false,
         "use_pitch_bends": false,
         "use_programs": true,
@@ -417,8 +417,8 @@
         "max_pitch_interval": 16,
         "pitch_intervals_max_time_dist": 1,
         "drums_pitch_range": [
-            27,
-            88
+            0,
+            127
         ],
         "ac_polyphony_track": false,
         "ac_polyphony_bar": false,
@@ -442,5 +442,5 @@
     "tokenization": "MMM",
     "miditok_version": "3.0.6.post1",
     "symusic_version": "0.6.0",
-    "hf_tokenizers_version": "0.22.2"
+    "hf_tokenizers_version": "0.23.1"
 }

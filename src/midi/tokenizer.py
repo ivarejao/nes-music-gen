@@ -3,6 +3,9 @@ from pathlib import Path
 import numpy as np
 import logging
 from argparse import Namespace, ArgumentParser
+from src.utils import setup_logger
+from symusic.factory import Score
+
 
 def parse_args() -> Namespace:
     parser = ArgumentParser()
@@ -10,28 +13,6 @@ def parse_args() -> Namespace:
 
     args = parser.parse_args()
     return args
-
-def setup_logger(name, log_file=None, level=logging.INFO):
-    """Sets up a logger that writes messages to a file."""
-    
-    # 1. Create a custom logger
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-
-    formatter = logging.Formatter('[%(asctime)s] %(name)s [%(levelname)s] %(message)s')
-    # 2. Create console handlers
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(level) 
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-
-    if log_file:
-        file_handler = logging.FileHandler(log_file, mode='a')
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(level)
-        logger.addHandler(file_handler)
-
-    return logger
 
 class MIDITokenizer():
 
@@ -72,12 +53,25 @@ class MIDITokenizer():
         tokens = self.model(midi_file_path, **kwargs)
         return tokens
 
-    def detokenize(self, numeric_ids : list | np.ndarray, **kwargs):
+    def detokenize(self, numeric_ids : list | np.ndarray, **kwargs) -> Score:
         if not (isinstance(numeric_ids, list) or isinstance(numeric_ids, np.ndarray)):
             self.logger.error("For detokenizing, the model should receive the numeric ids *tokens*")
             raise ValueError
         self.logger.debug(f"Total Tokens read: {len(numeric_ids)}")
         midi_detokenized = self.model(numeric_ids, **kwargs)
+
+        # NES specific detokenization
+        # set track name
+        names = ['p1', 'p2', 'tr', 'no']
+        for track, name in zip(midi_detokenized.tracks, names):
+            track.name = name
+
+        # add time signature at the end
+        reference_time_signature = midi_detokenized.time_signatures[0].copy()
+        reference_time_signature.time = midi_detokenized.end()
+        midi_detokenized.time_signatures.append(
+            reference_time_signature
+        )
         return midi_detokenized
 
 
@@ -89,6 +83,6 @@ if __name__ == "__main__":
     print("Tokenizador MMM (Base REMI) criado com sucesso!")
     print(f"Tamanho do vocabulário fixo: {len(midi_tokenizer.model)} tokens.")
 
-    caminho_salvamento = Path("tokenizers/symbolic/nes_tokenizers/nes_mmm_tokenizer.json")
+    caminho_salvamento = Path("models/tokenizers/symbolic/midi_mmm_tokenizer.json")
     midi_tokenizer.save_model(caminho_salvamento)
     print(f"Tokenizador salvo em: {caminho_salvamento}")

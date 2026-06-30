@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "nes-music-gen"
 version = "0.1.0"
@@ -7,4 +11,14 @@ requires-python = ">=3.10.12, <3.14"
 dependencies = [
     "miditok>=3.0.6.post1",
     "pandas>=2.3.3",
+    "requests>=2.34.2",
+]
+
+[tool.setuptools]
+# Explicitly tell the build system that 'src' is the package
+packages = ["src"]
+
+[dependency-groups]
+dev = [
+    "ipdb>=0.13.13",
 ]

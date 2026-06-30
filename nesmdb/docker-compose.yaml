@@ -1,0 +1,14 @@
+services:
+    nes:
+        build: .
+        tty: true
+        stdin_open: true
+        ports:
+            - 5555:5555
+        volumes:
+            - /home/igor/Desktop/Repos/nes-music-gen/nesmdb/interactive/app.py:/app/app.py # for dev
+            - /home/igor/Desktop/Repos/nes-music-gen/test_midi_tokens/test_midi:/data
+            # - /home/igor/Desktop/Repos/nes-music-gen/nesmdb/interactive/nesmdb:/workspace/nesmdb
+        environment:
+            - DATA_MOUNT_POINT=/home/igor/Desktop/Repos/nes-music-gen/test_midi_tokens/test_midi
+

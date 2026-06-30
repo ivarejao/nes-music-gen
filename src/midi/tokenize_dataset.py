@@ -40,7 +40,7 @@ def tokenize_dataset(data_dir : Path, midi_tokenizer : MIDITokenizer, output_dir
             
         print(f"\nProcessando {len(arquivos_midi)} arquivos da pasta '{split}'...")
         
-        for arquivo in tqdm(arquivos_midi[:1]):
+        for arquivo in tqdm(arquivos_midi):
             try:
                 tokens = midi_tokenizer.tokenize(arquivo)
                 
@@ -101,6 +101,11 @@ def detokenize_dataset(data_dir : Path, midi_tokenizer : MIDITokenizer, output_d
 def main():
     args = parse_args()
     midi_tokenizer = MIDITokenizer(Path(args.tokenizer_path), log_file=Path(args.output_dir) / "log.txt")
+    import json
+    vocab_path = Path(args.output_dir) / "vocab.json"
+    with open(vocab_path, "w") as f:
+        json.dump(midi_tokenizer.model.vocab, f)
+    print("Loaded model with vocab at {}".format(vocab_path))
     if args.tokenize:
         tokenize_dataset(Path(args.data_dir), midi_tokenizer, Path(args.output_dir))
     if args.detokenize:

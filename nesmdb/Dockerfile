@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Step 4: Set up the working directory
-WORKDIR /workspace
+WORKDIR /app
 
 # Step 5: Fix outdated pip, setuptools, and wheel versions for Python 2.7
 RUN pip install --no-cache-dir --upgrade "pip<21.0" "setuptools<45.0" "wheel<0.38.0"
@@ -27,9 +27,6 @@ RUN git clone https://github.com/chrisdonahue/nesmdb.git .
 # Step 7: Patch setup.py to handle the VGMPlay GitHub repo rename
 RUN sed -i 's/vgmplay-0.40.8/vgmplay-legacy-0.40.8/g' setup.py
 
-# Step 7.1: Fix VGM to NDR
-RUN sed -i "s/if version != '161':/if version not in ['161', '170']:/g" nesmdb/vgm/vgm_ndr.py
-
 # Step 8: Install the requirements individually
 RUN pip install --no-cache-dir "numpy>=1.7.0,<1.17.0" "scipy>=1.0.0,<1.3.0"
 RUN pip install --no-cache-dir "Pillow>=5.1.0,<7.0.0" "tqdm>=4.19.9"
@@ -39,8 +36,16 @@ RUN pip install --no-cache-dir "llvmlite==0.31.0" "numba==0.47.0" "resampy==0.2.
 RUN pip install --no-cache-dir "nose==1.3.7" "mido>=1.1.16" "pretty_midi==0.2.8"
 RUN pip install --no-cache-dir "librosa>=0.6.1,<0.8.0"
 
+# Install requirements for the API wraper
+# TODO move copy to begin of the file
+COPY requirements.txt requirements.txt 
+RUN pip install -r requirements.txt
+
 # Step 9: Finalize installation (note the .py!)
 RUN python setup.py install
 
-# Expose the CLI
-ENTRYPOINT ["nesmdb_convert"]
+# rename source directory in order to enviroment pick the installed pack and not the 
+# directory structure
+RUN mv nesmdb nesmdb_src
+
+CMD python app.py
