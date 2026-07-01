@@ -1,8 +1,8 @@
 from miditok import MMM, TokenizerConfig
 from pathlib import Path
 import numpy as np
-from argparse import Namespace, ArgumentParser
 from src.utils import setup_logger
+from argparse import Namespace, ArgumentParser
 from symusic.factory import Score
 
 
@@ -51,6 +51,22 @@ class MIDITokenizer():
             raise ValueError
         tokens = self.model(midi_file_path, **kwargs)
         return tokens
+    
+    # def tokenize(self, midi_file_path : str | Path, **kwargs):
+    #     if not (isinstance(midi_file_path, str) or isinstance(midi_file_path, Path)):
+    #         self.logger.error("For encoding, the model should receive the MIDI file path")
+    #         raise ValueError
+            
+        
+    #     import symusic
+    #     midi_bruto = symusic.Score(midi_file_path)
+        
+    #     for track in midi_bruto.tracks:
+    #         track.is_drum = False
+            
+        
+    #     tokens = self.model(midi_bruto, **kwargs)
+    #     return tokens
 
     def detokenize(self, numeric_ids : list | np.ndarray, **kwargs) -> Score:
         if not (isinstance(numeric_ids, list) or isinstance(numeric_ids, np.ndarray)):
@@ -64,6 +80,8 @@ class MIDITokenizer():
         names = ['p1', 'p2', 'tr', 'no']
         for track, name in zip(midi_detokenized.tracks, names):
             track.name = name
+            # if name == 'no':
+            #     track.is_drum = True
 
         # add time signature at the end
         reference_time_signature = midi_detokenized.time_signatures[0].copy()

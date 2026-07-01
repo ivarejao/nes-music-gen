@@ -11,9 +11,10 @@ requires-python = ">=3.10.12, <3.14"
 dependencies = [
     "miditok>=3.0.6.post1",
     "miditoolkit>=1.0.1",
+    "numpy<2.5",
     "pandas>=2.3.3",
     "requests>=2.34.2",
-    "tokenizers==0.23.1",
+    "tokenizers<=0.23.0",
 ]
 
 [tool.setuptools]
