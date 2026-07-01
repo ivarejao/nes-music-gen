@@ -46,6 +46,8 @@ CONVERSION_TO_TYPES = {
     'exprsco_to_wav': ('.exprsco.pkl', '.exprsco.wav'),
     'seprsco_to_wav': ('.seprsco.pkl', '.seprsco.wav'),
     'blndsco_to_wav': ('.blndsco.pkl', '.blndsco.wav'),
+    # Custom converters
+    'midi_to_nlm': ('.mid', '.nlm.pkl')
 }
 
 VALID_KEYS = set(CONVERSION_TO_TYPES.keys())

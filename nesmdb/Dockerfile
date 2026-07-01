@@ -41,6 +41,8 @@ RUN pip install --no-cache-dir "librosa>=0.6.1,<0.8.0"
 COPY requirements.txt requirements.txt 
 RUN pip install -r requirements.txt
 
+COPY convert.py nesmdb/convert.py
+
 # Step 9: Finalize installation (note the .py!)
 RUN python setup.py install
 
