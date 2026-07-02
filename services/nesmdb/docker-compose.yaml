@@ -9,6 +9,5 @@ services:
         volumes:
             - ./app.py:/app/app.py # for dev
             - $DATA_MOUNT_POINT:/data
-            # - /home/igor/Desktop/Repos/nes-music-gen/nesmdb/interactive/nesmdb:/workspace/nesmdb
         environment:
             - DATA_MOUNT_POINT

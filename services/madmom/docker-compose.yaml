@@ -1,0 +1,12 @@
+services:
+  madmom:
+    build: .
+    volumes:
+      - ./app.py:/app/app.py # for dev
+      - /ssd/nesmdb/complete/:/nesmdb/       
+    # command: bash
+    stdin_open: true
+    tty: true
+    command: uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1
+    ports:
+          - "8000:8000"
