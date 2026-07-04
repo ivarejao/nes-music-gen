@@ -5,7 +5,7 @@ from matplotlib.ticker import MaxNLocator
 
 DATASET_ROOT = "/home/es119256/dados/datasets/nes_dataset"
 
-xp_folder = os.path.join('./', "my_xp_cfg_midi")
+xp_folder = os.path.join('./', "my_xp_cfg_nlm")
 fig_path = os.path.join(xp_folder, "losses.png")
 data_path = os.path.join(xp_folder, "losses.json")
 

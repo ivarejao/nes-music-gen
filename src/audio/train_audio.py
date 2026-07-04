@@ -95,8 +95,8 @@ def evaluate_model_loss(model, dataloader, criterion):
         for batch in dataloader:
             _, input_tokens, target_tokens, _, txt_tokens, txt_tokens_mask  = batch
 
-            input_tokens = input_tokens.cuda()
-            txt_tokens = txt_tokens.cuda()
+            input_tokens = input_tokens.cuda().long()
+            txt_tokens = txt_tokens.cuda().long()
             txt_tokens_mask = txt_tokens_mask.cuda()
 
             logits = model(src=txt_tokens, tgt=input_tokens, src_mask=txt_tokens_mask)
@@ -219,7 +219,8 @@ def train_audio(
         for update, batch in enumerate(train_dataloader):
             _, input_tokens, target_tokens, _, txt_tokens, txt_tokens_mask = batch
 
-            input_tokens = input_tokens.cuda()
+            input_tokens = input_tokens.cuda().long()
+            target_tokens = target_tokens.cuda().long()
 
             if random.random() < 0.3:
                 drop_conditioning = True

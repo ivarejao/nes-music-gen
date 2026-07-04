@@ -76,7 +76,6 @@ def generate(
         dataset_root:str, 
         epoch:int, 
         decoder_size:TextGenSize,
-        audio_secs:int=60,
         xp_dir = './'
     ):
 
@@ -119,10 +118,7 @@ def generate(
         collate_fn=collate,
     )
 
-    iter_loader = iter(test_dataloader)
-
-    for i in range(3):
-        batch = next(iter_loader)
+    for batch in test_dataloader:
         file_name_prefix, input_tokens, target_tokens, txt_tokens, txt_tokens_mask = batch
 
         for i in range(len(file_name_prefix)):
@@ -137,9 +133,9 @@ def generate(
                     src=conditioner,
                     src_mask=conditioner_mask,
                     temperature=1, # < 1 -> eliminate randomness | = 1 -> the distribution learned | > 1 -> aproximate a uniform distribution
+                    cfg_scale=3.0,
                     top_k=10
                 )
-
 
                 logger.info(f"Decoded midi shape: {midi_tokens.shape}")
                 path = os.path.join(generation_folder, file_name_prefix[i]+'.json')
@@ -150,16 +146,6 @@ def generate(
 
 
 if __name__ == "__main__":
-    # torch.serialization.add_safe_globals([
-    #     MusicGenTransformer, 
-    #     torch.nn.modules.container.ModuleList, 
-    #     torch.nn.modules.sparse.Embedding,
-    #     any2music.audio.decoders.musicgen.MusicgenSinusoidalPositionalEmbedding,
-    #     torch.nn.modules.transformer.TransformerDecoder,
-    #     torch.nn.modules.transformer.TransformerDecoderLayer,
-    #     torch.nn.modules.activation.MultiheadAttention
-    # ])
-
     generate(
         dataset_root=DATASET_ROOT,
         epoch=50,

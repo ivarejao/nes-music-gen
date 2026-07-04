@@ -4,7 +4,6 @@ import logging
 import torch
 from torch.utils.data import DataLoader
 
-import any2music
 from any2music.audio.tokenizers import DACCompressionModel
 from any2music.audio.decoders.musicgen import MusicGenTransformer, MusicGenSize
 
@@ -100,10 +99,7 @@ def generate(
         collate_fn=collate,
     )
 
-    iter_loader = iter(test_dataloader)
-
-    for i in range(3):
-        batch = next(iter_loader)
+    for batch in test_dataloader:
         file_name_prefix, input_tokens, target_tokens, meta, txt_tokens, txt_tokens_mask = batch
 
         for i in range(len(file_name_prefix)):
@@ -118,12 +114,14 @@ def generate(
                     src=conditioner,
                     src_mask=conditioner_mask,
                     temperature=1, # < 1 -> eliminate randomness | = 1 -> the distribution learned | > 1 -> aproximate a uniform distribution
-                    top_k=50
+                    cfg_scale=3.0,
+                    top_k=10
                 )
 
                 print(f"Generate audio codes shape: {audio_tokens.shape}\n")
 
                 # Decode back to audio
+                audio_tokens = torch.clamp(audio_tokens, min=0, max=dac.orig_vocab_size - 1)
                 total_generated_samples = audio_tokens.shape[-1] * dac.model.hop_length
                 meta[i]['original_length'] = min(meta[i]['original_length'], total_generated_samples)
                 decoded_audio = dac.decode(audio_tokens.cpu(), meta[i])
@@ -133,18 +131,8 @@ def generate(
                 decoded_audio.write(path)
 
 if __name__ == "__main__":
-    # torch.serialization.add_safe_globals([
-    #     MusicGenTransformer, 
-    #     torch.nn.modules.container.ModuleList, 
-    #     torch.nn.modules.sparse.Embedding,
-    #     any2music.audio.decoders.musicgen.MusicgenSinusoidalPositionalEmbedding,
-    #     torch.nn.modules.transformer.TransformerDecoder,
-    #     torch.nn.modules.transformer.TransformerDecoderLayer,
-    #     torch.nn.modules.activation.MultiheadAttention
-    # ])
-
     generate(
         dataset_root=DATASET_ROOT,
-        epoch=10,
+        epoch=50,
         decoder_size=MusicGenSize.SMALL
     )
