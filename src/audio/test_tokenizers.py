@@ -8,7 +8,6 @@ from torchaudio import save as save_audio
 
 from audiotools import AudioSignal
 from any2music.audio.tokenizers import DACCompressionModel, HFEncodecCompressionModel
-from any2music.audio.utils import load_mono_and_resample
 
 
 from src.dataset.dataset import NESTestTokenizersDataset
@@ -33,13 +32,15 @@ def instantiate_xp(xp_dir):
 
 
 def tokenize(wav:str, audio_secs:int, audio_tokenizer):
-    max_audio_len = audio_tokenizer.sample_rate*audio_secs
+    sr = audio_tokenizer.sample_rate
+    max_audio_len = sr*audio_secs
     max_audio_tokens = int(audio_tokenizer.frame_rate*audio_secs)
 
-    if isinstance(wav, str):
-        audio_tensor = AudioSignal(wav, device='cuda').to_mono()[:, :, :max_audio_len].cuda()
-    else:
-        audio_tensor = wav
+    audio_tensor = AudioSignal(wav, device='cuda').resample(sr).to_mono()[:, :, :max_audio_len].cuda()
+
+    # Encodec needs the Tensor not the AudioSignal
+    if sr == 32_000:
+        audio_tensor = audio_tensor.audio_data
 
     # Tokenize the audio
     with torch.no_grad():
@@ -96,19 +97,37 @@ def test_audio_tokenizers(
             # DAC
             encoded_dac, meta_dac, audio_tensor = tokenize(wav_path, audio_secs, dac)
             decoded_dac = detokenize(encoded_dac, meta_dac, dac)
-            smaller_last_dim = min(decoded_dac.shape[-1], audio_tensor.shape[-1])
-            logging.info(f"{decoded_dac.shape} | {audio_tensor.shape}")
-            dac_error += (decoded_dac.audio_data.squeeze()[:smaller_last_dim].cuda() - audio_tensor.squeeze()[:smaller_last_dim]).abs().mean().item()
+
+            # save
+            save_path = os.path.join(dac_folder, file_name_prefix+'.wav')
+            decoded_dac.write(save_path)
+
+            # MAE
+            smallest_last_dim = min(decoded_dac.shape[-1], audio_tensor.shape[-1])
+            logging.debug(f"decoded_dac.shape: {decoded_dac.shape} | audio_tensor.shape: {audio_tensor.shape}")
+
+            decoded_dac = decoded_dac.audio_data.squeeze()[:smallest_last_dim].cuda()
+            audio_tensor = audio_tensor.squeeze()[:smallest_last_dim]
+
+            dac_error += (decoded_dac - audio_tensor).abs().mean().item()
+
 
             # Encodec
-            audio_tensor = load_mono_and_resample(wav_path, encodec.sample_rate)[0]
-            audio_tensor = audio_tensor.unsqueeze(0).cuda() # add batch dim
-
-            encoded_encodec, meta_encodec, _ = tokenize(audio_tensor, audio_secs, encodec)
+            encoded_encodec, meta_encodec, audio_tensor = tokenize(wav_path, audio_secs, encodec)
             decoded_encodec = detokenize(encoded_encodec, meta_encodec, encodec)
-            smaller_last_dim = min(decoded_encodec.shape[-1], audio_tensor.shape[-1])
-            logging.info(f"{decoded_encodec.shape} | {audio_tensor.shape} | smaller_last_dim {smaller_last_dim}")
-            encodec_error += (decoded_encodec.squeeze()[:smaller_last_dim].cuda() - audio_tensor.squeeze()[:smaller_last_dim].cuda()).abs().mean().item()
+
+            # save
+            save_path = os.path.join(encodec_folder, file_name_prefix+'.wav')
+            save_audio(save_path, decoded_encodec.squeeze().cpu(), sample_rate=encodec.sample_rate)
+
+            # MAE
+            smallest_last_dim = min(decoded_encodec.shape[-1], audio_tensor.shape[-1])
+            logging.debug(f"decoded_encodec.shape: {decoded_encodec.shape} | audio_tensor.shape: {audio_tensor.shape}")
+
+            decoded_encodec = decoded_encodec.squeeze()[:smallest_last_dim].cuda()
+            audio_tensor = audio_tensor.squeeze()[:smallest_last_dim].cuda()
+
+            encodec_error += (decoded_encodec - audio_tensor).abs().mean().item()
 
             n_files += 1
     

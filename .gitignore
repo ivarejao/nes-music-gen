@@ -226,3 +226,4 @@ cmd/
 *.json
 *.pth
 *.wav
+*.mp3
