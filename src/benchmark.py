@@ -15,6 +15,8 @@ from any2music.metrics.fad import FADMetric
 from any2music.metrics.kld import KLDMetric
 from any2music.metrics.clap_score import ClapScoreMetric
 
+
+
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -65,6 +67,12 @@ def free_gpu(*objs):
 def load_wav(path):
     """Load a wav as [1, Channels, Time] (batch dim added), plus its sample rate."""
     wav, sr = torchaudio.load(path)          # [Channels, Time]
+
+    min_samples = 1024
+    if wav.shape[-1] < min_samples:
+        import torch.nn.functional as F #arrumar depois se funcionar, evitar erro de sample pequena
+        wav = F.pad(wav, (0, min_samples - wav.shape[-1]))
+
     return wav.unsqueeze(0), sr              # [1, Channels, Time]
 
 def collect_pairs(gt_dir, pred_dir):
@@ -127,7 +135,7 @@ def feed_pair(metric, name, gt_path, pred_path, captions, needs_text):
         key = os.path.splitext(name)[0]          # '...PowerAttackBoss.wav' -> '...PowerAttackBoss'
         text = captions.get(key)
         if text is None:
-            print(f"[warn] no caption for '{name}', skipping it for CLAP.")
+            print(f"[Warning] no caption for '{name}', skipping it for CLAP.")
             return False
         metric.update(preds, targets, current_sr=sr, texts=[text])
     else:
@@ -177,7 +185,8 @@ def benchmark(gt_dir, pred_dir, captions_path=None):
 
     print("Computing FAD...")
     fad_res = run_metric("fad", FADMetric, pairs)
-
+    # kld_res = {"overall": 0.419620, "mean": 0.419620, "std": 0.763889, "n": 332}
+    # fad_res = {"overall": 8.409910, "mean": 36.408385, "std": 33.479918, "n": 332}
     print("Computing CLAPScore...")
     clap_res = run_metric("clap", ClapScoreMetric, pairs, captions=captions, needs_text=True)
 
@@ -187,6 +196,8 @@ def benchmark(gt_dir, pred_dir, captions_path=None):
               f"{res['mean']:.6f} ± {res['std']:.6f}  (n={res['n']})")
 
     return {"kld": kld_res, "fad": fad_res, "clap": clap_res}
+
+# csv do dicionario
 
 def synthesize_files(handler, input_dir, output_dir, ext):
     """
@@ -226,19 +237,52 @@ def run_symbolic_pipeline(handler_class, tokenizer_path, pred_dir, gt_dir, capti
     out_dir = os.path.join(handler.data_mount_point, f"eval_benchmark_{label}")
     
     wav_dir = synthesize_files(handler, pred_dir, out_dir, ext)
-    benchmark(gt_dir, wav_dir, captions)
+    return benchmark(gt_dir, wav_dir, captions)
+    
+
+
+def generate_latex_table(all_results):
+    """
+    Generates a LaTeX table string from the aggregated benchmark results.
+    Expects a dictionary like: {"Audio": {...}, "MIDI": {...}, "NLM": {...}}
+    """
+    def fmt(metric_res):
+        # Helper to format "mean \pm std" safely
+        if not metric_res or metric_res.get("mean") is None:
+            return "---"
+        return f"${metric_res['mean']:.4f} \\pm {metric_res['std']:.4f}$"
+
+    lines = [
+        "\\begin{table}[h!]\\centering\\begin{tabular}{l*3c}\\toprule",
+        "Format & KLD $\\downarrow$ & FAD $\\downarrow$ & CLAPScore $\\uparrow$ \\\\\\midrule"
+    ]
+
+    # Force a specific order if they exist in the results
+    for format_name in ["Audio", "MIDI", "NLM"]:
+        if format_name in all_results:
+            res = all_results[format_name]
+            kld_str = fmt(res.get("kld"))
+            fad_str = fmt(res.get("fad"))
+            clap_str = fmt(res.get("clap"))
+            lines.append(f"{format_name} & {kld_str} & {fad_str} & {clap_str} \\\\")
+
+    lines.append("\\bottomrule\\end{tabular}")
+    lines.append("\\caption{Performance Evaluation across multiple formats}\\label{tab:results_generation}\\end{table}")
+
+    return "\n".join(lines)
 
 def main():
     args = parse_args()
+    all_results = {}
     
     # Pipeline 1: Direct WAV Evaluation
     if args.pred_wavs:
         print("Evaluating direct WAV predictions...")
-        benchmark(args.gt_dir, args.pred_wavs, args.captions)
+        all_results["Audio"] = benchmark(args.gt_dir, args.pred_wavs, args.captions)
         
     # Pipeline 2: Symbolic MIDI Evaluation
     if args.pred_midis:
-        run_symbolic_pipeline(
+        all_results["MIDI"] = run_symbolic_pipeline(
             handler_class=MIDIHandler,
             tokenizer_path=args.midi_tokenizer,
             pred_dir=args.pred_midis,
@@ -250,16 +294,22 @@ def main():
         
     # Pipeline 3: Text NLM Evaluation
     if args.pred_nlms:
-        run_symbolic_pipeline(
+        all_results["NLM"] = run_symbolic_pipeline(
             handler_class=NLMHandler,
             tokenizer_path=args.nlm_tokenizer,
             pred_dir=args.pred_nlms,
             gt_dir=args.gt_dir,
             captions=args.captions,
             label="nlm",
-            ext="nlm"
+            ext="pkl"
         )
 
+    # LaTeX Reporter
+    if all_results:
+        print("\n\n============================")
+        latex_code = generate_latex_table(all_results)
+        print(latex_code)
+        print("============================\n")
 
 if __name__ == "__main__":
     main()

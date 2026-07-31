@@ -7,14 +7,17 @@ name = "nes-music-gen"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10.12, <3.14"
+requires-python = ">=3.10.12, <3.13"
 dependencies = [
+    "any2music",
     "miditok>=3.0.6.post1",
     "miditoolkit>=1.0.1",
     "numpy<2.5",
     "pandas>=2.3.3",
     "requests>=2.34.2",
     "tokenizers<=0.23.0",
+    "torch>=2.12.1",
+    "torchaudio>=2.11.0",
 ]
 
 [tool.setuptools]
@@ -25,3 +28,23 @@ packages = ["src"]
 dev = [
     "ipdb>=0.13.13",
 ]
+
+[tool.uv]
+# Avisa pro uv calcular apenas para o seu Linux, ignorando o Windows
+environments = ["sys_platform == 'linux'"]
+
+# Força os submódulos a aceitarem qualquer versão do PyTorch que já tivermos instalada, 
+# ignorando solenemente o +cu126
+override-dependencies = [
+    "torch",
+    "torchaudio",
+    "torchvision"
+]
+
+[tool.uv.workspace]
+members = [
+    "any2music",
+]
+
+[tool.uv.sources]
+any2music = { workspace = true, editable = true }
