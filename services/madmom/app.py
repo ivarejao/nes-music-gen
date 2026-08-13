@@ -8,8 +8,8 @@ MAX_FILES = 10
 CORES = multiprocessing.cpu_count()
 
 DEFAULTS = {
-    "TempoDetector":  {"out_dir": "/nesmdb/TempoDetector",  "suffix": ".bpm.txt"},
-    "KeyRecognition": {"out_dir": "/nesmdb/KeyRecognition", "suffix": ".key.txt"},
+    "TempoDetector":  {"out_dir": "/data/TempoDetector",  "suffix": ".bpm.txt"},
+    "KeyRecognition": {"out_dir": "/data/KeyRecognition", "suffix": ".key.txt"},
 }
 
 class Request(BaseModel):

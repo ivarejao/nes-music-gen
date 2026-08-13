@@ -3,13 +3,9 @@
 # 1) Remove all pieces that are not in common time (i.e., 4/4)
 # 2) Remove all non-piano tracks
 # 3) Combine multiple piano tracks into a single one
-#
-# Lucas N. Ferreira
-# lucasnfe@gmail.com
-#
-#
 # TODO: Organize
 
+import logging
 import os
 import copy
 import argparse
@@ -34,12 +30,22 @@ from src.utils import setup_logger
 DESCRIPTOR_API_URL = "http://localhost:8000"
 NESMDB_API_URL = "http://localhost:5555"
 
+LOGGING_SPECS = {
+    "name":"Augment", 
+    "log_file":"augment.log", 
+    "level":logging.DEBUG
+}
+
 
 # Range of transposition intervals (in semi-tones)
 transpose_intervals = range(-4, 5)
 
 # Range of strech factors
 stretch_factors = [0.8, 0.9, 1.0]
+
+# debug
+transpose_intervals = range(-1, 1)
+stretch_factors = [0.8]
 
 def _serializable(field):
     return [str(i) for i in field] if isinstance(field, list) else str(field)
@@ -133,7 +139,9 @@ def call_madmom(endpoint: str, tracks: list[str], out_dir: str | None = None, ti
     payload = {"tracks": _serializable(tracks)}
     if out_dir is not None:
         payload["out_dir"] = _serializable(out_dir)
-
+    
+    print(tracks)
+    print(payload, f"{DESCRIPTOR_API_URL}/{endpoint}")
     resp = requests.post(f"{DESCRIPTOR_API_URL}/{endpoint}", json=payload, timeout=timeout)
     resp.raise_for_status()
     return resp.json()
@@ -187,9 +195,11 @@ def apply_results(new_samples, tempo=None, key=None):
     return new_samples
 
 
-def proc_one(reference : pd.Series, root_dir : str):
-    print('----')
-    print(' >', reference["file_path_midi"])
+def worker(reference : pd.Series, root_dir : str, log_queue : mp.Queue):
+
+    logger = setup_logger(**LOGGING_SPECS, queue=log_queue)
+
+    logger.info("Starting augmentation of ", reference["file_path_midi"])
 
     midi_obj = miditoolkit.midi.parser.MidiFile(
         Path(root_dir) / reference["file_path_midi"]
@@ -220,13 +230,13 @@ def proc_one(reference : pd.Series, root_dir : str):
         elif factor > 1.0:
             strech_suffix = "_fast_" + str(int(factor * 100))
 
-        sample_signature_name = interval_suffix + strech_suffix
+        track_signature_name = interval_suffix + strech_suffix
 
-        print(sample_signature_name)
+        logger.info("Track signature: ", track_signature_name)
 
         # create directory
         base_dir = Path(
-            os.path.join(root_dir, str(reference["id"]), reference["track_name"] + sample_signature_name)
+            os.path.join(root_dir, str(reference["id"]), reference["track_name"] + track_signature_name)
         )
 
         base_dir.mkdir(exist_ok=True)
@@ -243,24 +253,24 @@ def proc_one(reference : pd.Series, root_dir : str):
         # Strech midi
         strech(transposed_streched_mid, factor)
 
-        midi_new_path = base_dir / (reference["file_name_prefix"] + sample_signature_name + ".mid")
+        midi_new_path = base_dir / (reference["file_name_prefix"] + track_signature_name + ".mid")
 
         # save midi
-        print(' >', midi_new_path)
+        logger.debug("New MIDI Track: ", midi_new_path)
         transposed_streched_mid.dump(midi_new_path)
 
-        # # convert to nlm
-        # nlm_new_path = convert(midi_new_path, os.path.dirname(midi_new_path), root_dir, "midi_to_nlm")
-        # nlm_new_path = root_dir / Path(nlm_new_path).relative_to("/data")
-        # # convert to wav
-        # wav_new_path = convert(midi_new_path, os.path.dirname(midi_new_path), root_dir, "midi_to_wav")
-        # wav_new_path = root_dir / Path(wav_new_path).relative_to("/data")
+        # convert to nlm
+        nlm_new_path = convert(midi_new_path, os.path.dirname(midi_new_path), root_dir, "midi_to_nlm")
+        nlm_new_path = root_dir / Path(nlm_new_path).relative_to("/data")
+        # convert to wav
+        wav_new_path = convert(midi_new_path, os.path.dirname(midi_new_path), root_dir, "midi_to_wav")
+        wav_new_path = root_dir / Path(wav_new_path).relative_to("/data")
 
-        # wav_signals.append(wav_new_path)
+        wav_signals.append(wav_new_path)
 
-        # print(midi_new_path, nlm_new_path, wav_new_path)
+        logger.debug("New paths: \n", midi_new_path, nlm_new_path, wav_new_path)
 
-        # duration = get_wav_duration(wav_new_path)
+        duration = get_wav_duration(wav_new_path)
 
         end_time = time.perf_counter()
         elapsed_time = int(end_time - start_time)
@@ -270,33 +280,47 @@ def proc_one(reference : pd.Series, root_dir : str):
         minutes, seconds = divmod(remainder, 60)
         
         # Display formatted result
-        print(f"Execution time: {hours:02}:{minutes:02}:{seconds:02}")
+        logger.info(f"Execution time: {hours:02}:{minutes:02}:{seconds:02}")
 
-        # new_sample = reference.copy()
-        # new_sample["file_path_midi"] = Path(midi_new_path).relative_to(root_dir)
-        # new_sample["file_path_nlm"] = Path(nlm_new_path).relative_to(root_dir)
-        # new_sample["file_path_wav"] = Path(wav_new_path).relative_to(root_dir)
-        # new_sample["file_name_prefix"] = reference["file_name_prefix"] + sample_signature_name
-        # new_sample["duration"] = duration
-        # new_sample["has_vgm"] = False
-        # new_sample["file_path_midi_tokens"] = None
-        # new_sample["file_path_nlm_tokens"] = None
+        augmented_sample = reference.copy()
+        augmented_sample["file_path_midi"] = Path(midi_new_path).relative_to(root_dir)
+        augmented_sample["file_path_nlm"] = Path(nlm_new_path).relative_to(root_dir)
+        augmented_sample["file_path_wav"] = Path(wav_new_path).relative_to(root_dir)
+        augmented_sample["file_name_prefix"] = reference["file_name_prefix"] + track_signature_name
+        augmented_sample["duration"] = duration
+        augmented_sample["has_vgm"] = False
+        augmented_sample["file_path_midi_tokens"] = None
+        augmented_sample["file_path_nlm_tokens"] = None
 
-        # new_sample["has_music_track_description"] = None
-        # new_sample["file_path_music_track_description"] = None
+        augmented_sample["has_music_track_description"] = None
+        augmented_sample["file_path_music_track_description"] = None
 
-        # new_samples[wav_new_path] = new_sample
+        new_samples[wav_new_path] = augmented_sample
 
-    # create descriptors
-    # tempo = detect_tempo(wav_signals, out_dir="/nesmdb/TempoDetector")
-    # key = recognize_key(wav_signals, out_dir="/nesmdb/KeyRecognition")
+    # convert the wav signals path to the respective file system 
+    # of the docker service
+    wav_container_paths = [Path("/data/") / p.relative_to(root_dir) for p in wav_signals]
 
-    # # apply the keys
-    # # tempo_bpm,tempo_conf,key
-    # new_samples = apply_results(new_samples, tempo=tempo)
-    # new_samples = apply_results(new_samples, key=key)
+    # create descriptors in batch
+    tempo = detect_tempo(wav_container_paths, out_dir="/data/TempoDetector")
+    key = recognize_key(wav_container_paths, out_dir="/data/KeyRecognition")
 
-    # return list(new_samples.values)
+    # apply the keys
+    # tempo_bpm,tempo_conf,key
+    new_samples = apply_results(new_samples, tempo=tempo)
+    new_samples = apply_results(new_samples, key=key)
+
+    # then save it the metadata for each new track, in order to make 
+    # medium results
+    for wav_path, metadata in new_samples.items():
+        metadata = metadata.to_frame().transpose()
+        wav_path_name = wav_path.name.split('.')[0]
+        track_metadata_path = wav_path.with_name(f"{wav_path_name}.csv")
+        track_signature_name = os.path.basename(os.path.dirname(track_metadata_path)) 
+        metadata.to_csv(track_metadata_path, index=False)
+        logger.info("Saving metadata of track {} at\n |-> {}".format(track_signature_name, track_metadata_path))
+    
+    logger.info("Sucessful augmented of {} into {} new samples".format(os.path.basename(reference["file_path_midi"]), len(new_samples)))
 
 
 
@@ -308,9 +332,23 @@ if __name__ == '__main__':
 
     root_dir = Path(args.dataset_path).absolute()
 
+    # setup for multiprocessing logging
+    logger = setup_logger(**LOGGING_SPECS)
+    manager = mp.Manager()
+    log_queue = manager.Queue() # specific queue that will be responsible for logging into file
+
+    listener = logging.handlers.QueueListener(
+        log_queue, 
+        logger.handlers,
+        respect_handler_level=True
+    )
+    listener.start()
+
+    # TODO: add NLMHandler and MIDIHandler loggers into the main logger
+
     df = pd.read_csv(root_dir / "nes_metadata.csv")
     df["id"] = df.id.map('{:03d}'.format)
-    df = df[~(df.split == "test")]
+    # df = df[~(df.split == "test")] # TODO: remove this when running
     df = df[df.has_midi]
 
     print(root_dir)
@@ -328,15 +366,24 @@ if __name__ == '__main__':
     #     root_dir
     # ]]
 
-    # data = [[
-    #     df[(df.id == "000") & (df.track_name == "GameStart")].iloc[0],
-    #     root_dir
-    # ]]
+    data = [
+        (
+            df[(df.id == "000") & (df.track_name == "GameStart")].iloc[0],
+            root_dir
+        ),
+        (
+            df[(df.id == "005") & (df.track_name == "Ending")].iloc[0],
+            root_dir
+        )
+    ]
 
+    
+
+    # proc_one(*data[0])
     # augmented_data = []
     # for sample in tqdm(data):
     #     new_samples = proc_one(*sample)
     #     augmented_data.extend(new_samples)
     # run, multi-thread
     pool = mp.Pool()
-    pool.starmap(proc_one, data)
+    pool.starmap(worker, data)

@@ -8,6 +8,7 @@ from argparse import Namespace, ArgumentParser
 from urllib.parse import urljoin
 
 import numpy as np
+from traitlets import Unicode
 
 from src.nlm.tokenizer import NLMTokenizer
 from src.utils import setup_logger
@@ -22,6 +23,64 @@ def parse_args() -> Namespace:
     parser.add_argument('--output-dir',     help='Define output directory')
     return parser.parse_args()
 
+# Valid nlm command tokens -> {'reg': register offset, 'max': max value}.
+# Function tokens are '<ch>_<fu>'. Special commands: 'w' (wait), 'clock'.
+# 'reg'/'max' are None for special commands (not APU register-backed).
+NLM_COMMANDS = {
+    # --- Pulse 1 ---
+    'p1_du': {'reg': 0, 'max': 3},
+    'p1_lh': {'reg': 0, 'max': 1},
+    'p1_cv': {'reg': 0, 'max': 1},
+    'p1_vo': {'reg': 0, 'max': 15},
+    'p1_se': {'reg': 1, 'max': 1},
+    'p1_sp': {'reg': 1, 'max': 7},
+    'p1_sn': {'reg': 1, 'max': 1},
+    'p1_ss': {'reg': 1, 'max': 7},
+    'p1_tl': {'reg': 2, 'max': 255},
+    'p1_ll': {'reg': 3, 'max': 31},
+    'p1_th': {'reg': 3, 'max': 7},
+
+    # --- Pulse 2 ---
+    'p2_du': {'reg': 0, 'max': 3},
+    'p2_lh': {'reg': 0, 'max': 1},
+    'p2_cv': {'reg': 0, 'max': 1},
+    'p2_vo': {'reg': 0, 'max': 15},
+    'p2_se': {'reg': 1, 'max': 1},
+    'p2_sp': {'reg': 1, 'max': 7},
+    'p2_sn': {'reg': 1, 'max': 1},
+    'p2_ss': {'reg': 1, 'max': 7},
+    'p2_tl': {'reg': 2, 'max': 255},
+    'p2_ll': {'reg': 3, 'max': 31},
+    'p2_th': {'reg': 3, 'max': 7},
+
+    # --- Triangle ---
+    'tr_lh': {'reg': 0, 'max': 1},
+    'tr_lr': {'reg': 0, 'max': 127},
+    'tr_tl': {'reg': 2, 'max': 255},
+    'tr_ll': {'reg': 3, 'max': 31},
+    'tr_th': {'reg': 3, 'max': 7},
+
+    # --- Noise ---
+    'no_lh': {'reg': 0, 'max': 1},
+    'no_cv': {'reg': 0, 'max': 1},
+    'no_vo': {'reg': 0, 'max': 15},
+    'no_nl': {'reg': 2, 'max': 1},
+    'no_np': {'reg': 2, 'max': 15},
+    'no_ll': {'reg': 3, 'max': 31},
+
+    # --- Channel status ---
+    'ch_no': {'reg': 0, 'max': 1},
+    'ch_tr': {'reg': 0, 'max': 1},
+    'ch_p2': {'reg': 0, 'max': 1},
+    'ch_p1': {'reg': 0, 'max': 1},
+
+    # --- Frame counter ---
+    'fc_mo': {'reg': 0, 'max': 1},
+
+    # --- Special (non-register) commands ---
+    'w':     {'reg': None, 'max': None},   # wait / time advance
+    'clock': {'reg': None, 'max': None},   # clock rate command
+}
 
 class NLMHandler():
 
@@ -73,19 +132,6 @@ class NLMHandler():
         """Decode numeric token ids back into nlm script text """
         return self._tokenizer.detokenize(numeric_ids)
 
-    def parse_nlm(self, nlm_text : str) -> list[tuple]:
-        """Parse the nlm text into original format of pickle file, a list of (function_name, value) tuples."""
-        original_tuples = []
-        for cmd in nlm_text.split():
-            parts = cmd.rsplit("_", 1)
-            if len(parts) == 2:
-                try:
-                    original_tuples.append((parts[0], int(parts[1])))
-                except ValueError:
-                    pass  # skip malformed tokens
-
-        return original_tuples
-
     def save_nlm(self, tuples: list[tuple], output_path: str | Path) -> None:
         """Persist a list of (function_name, value) tuples as a .nlm.pkl file."""
         output_path = Path(output_path)
@@ -110,6 +156,68 @@ class NLMHandler():
         endpoint = urljoin(API_URL, "data-mount-point")
         response = requests.get(endpoint)
         return response.json()["DATA_MOUNT_POINT"]
+
+    def parse_nlm(self, nlm_text: str) -> list[tuple]:
+        """Validate a loaded nlm structure against NLM_COMMANDS.
+
+        An nlm is: [header, comm, comm, ...] where each comm is a 2-tuple:
+        ('w', duration)          -> wait
+        ('clock', rate)          -> clock header/command
+        ('<ch>_<fu>', value)     -> APU function, value must be 0..max
+
+        Returns a list of human-readable error strings (empty list == valid).
+        """
+        cmds_text = nlm_text.split()
+
+        valids_commands = []
+
+        for i, comm in enumerate(cmds_text):
+            parts = comm.rsplit("_", 1)
+            if len(parts) != 2:
+                self.logger.warning(
+                    'index {}: expected a 2-element command, got {!r}'.format(i, comm))
+                continue
+
+            token, value = parts[0], parts[1]
+
+            try:
+                # register-backed function: value must be int within 0..max.
+                value = int(value)
+            except ValueError:
+                self.logger.warning(
+                    'index {}: command {!r} expects an integer value, got {!r}'.format(
+                        i, token, value))
+                continue
+
+            # Normalize unicode (py2.7) so 'w' == u'w' during lookup.
+            key = token.encode('utf-8').decode('utf-8') if isinstance(token, Unicode) else token
+
+            if key not in NLM_COMMANDS:
+                self.logger.warning(
+                    'index {}: unknown command token {!r}'.format(i, token))
+                continue
+
+            spec = NLM_COMMANDS[key]
+
+            # Special commands (w, clock): only require an int-ish value.
+            if spec['max'] is None:
+                if not isinstance(value, int):
+                    self.logger.warning(
+                        'index {}: command {!r} expects an integer value, got {!r}'.format(
+                            i, token, value))
+                continue
+
+
+            if value < 0 or value > spec['max']:
+                self.logger.warning(
+                    'index {}: command {!r} value {} out of range 0..{}'.format(
+                        i, token, value, spec['max']))
+                continue
+            
+            valids_commands.append((token, value))
+
+
+        return valids_commands
 
 
 if __name__ == "__main__":
