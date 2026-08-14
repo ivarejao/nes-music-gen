@@ -6,6 +6,7 @@
 # TODO: Organize
 
 import logging
+import logging.handlers
 import os
 import copy
 import argparse
@@ -44,8 +45,8 @@ transpose_intervals = range(-4, 5)
 stretch_factors = [0.8, 0.9, 1.0]
 
 # debug
-transpose_intervals = range(-1, 1)
-stretch_factors = [0.8]
+transpose_intervals = range(-1, 2)  
+stretch_factors = [0.8, 0.9, 1.0]
 
 def _serializable(field):
     return [str(i) for i in field] if isinstance(field, list) else str(field)
@@ -197,9 +198,15 @@ def apply_results(new_samples, tempo=None, key=None):
 
 def worker(reference : pd.Series, root_dir : str, log_queue : mp.Queue):
 
-    logger = setup_logger(**LOGGING_SPECS, queue=log_queue)
+    # logger = setup_logger(**LOGGING_SPECS, queue=log_queue)
 
-    logger.info("Starting augmentation of ", reference["file_path_midi"])
+    queue_handler = logging.handlers.QueueHandler(log_queue)
+    logger = logging.getLogger(LOGGING_SPECS["name"])
+    logger.setLevel(logging.INFO)
+    logger.addHandler(queue_handler)
+
+
+    logger.info("Starting augmentation of " + str(reference["file_path_midi"]))
 
     midi_obj = miditoolkit.midi.parser.MidiFile(
         Path(root_dir) / reference["file_path_midi"]
@@ -232,7 +239,7 @@ def worker(reference : pd.Series, root_dir : str, log_queue : mp.Queue):
 
         track_signature_name = interval_suffix + strech_suffix
 
-        logger.info("Track signature: ", track_signature_name)
+        logger.info("Track signature: " + track_signature_name)
 
         # create directory
         base_dir = Path(
@@ -256,7 +263,7 @@ def worker(reference : pd.Series, root_dir : str, log_queue : mp.Queue):
         midi_new_path = base_dir / (reference["file_name_prefix"] + track_signature_name + ".mid")
 
         # save midi
-        logger.debug("New MIDI Track: ", midi_new_path)
+        logger.debug("New MIDI Track: " + str(midi_new_path))
         transposed_streched_mid.dump(midi_new_path)
 
         # convert to nlm
@@ -268,7 +275,7 @@ def worker(reference : pd.Series, root_dir : str, log_queue : mp.Queue):
 
         wav_signals.append(wav_new_path)
 
-        logger.debug("New paths: \n", midi_new_path, nlm_new_path, wav_new_path)
+        logger.debug("New paths: \n" + str(midi_new_path) + " | " + str(nlm_new_path) + " | " + str(wav_new_path))
 
         duration = get_wav_duration(wav_new_path)
 
@@ -348,7 +355,7 @@ if __name__ == '__main__':
 
     df = pd.read_csv(root_dir / "nes_metadata.csv")
     df["id"] = df.id.map('{:03d}'.format)
-    # df = df[~(df.split == "test")] # TODO: remove this when running
+    df = df[~(df.split == "test")] # TODO: remove this when running
     df = df[df.has_midi]
 
     print(root_dir)
@@ -357,7 +364,7 @@ if __name__ == '__main__':
     data = []
     for idx, sample in df.iterrows():
         # append
-        data.append([sample, root_dir])
+        data.append([sample, root_dir, log_queue])
         # if idx > 20:
             # break
 
@@ -366,16 +373,16 @@ if __name__ == '__main__':
     #     root_dir
     # ]]
 
-    data = [
-        (
-            df[(df.id == "000") & (df.track_name == "GameStart")].iloc[0],
-            root_dir
-        ),
-        (
-            df[(df.id == "005") & (df.track_name == "Ending")].iloc[0],
-            root_dir
-        )
-    ]
+    # data = [
+    #     (
+    #         df[(df.id == "000") & (df.track_name == "GameStart")].iloc[0],
+    #         root_dir
+    #     ),
+    #     (
+    #         df[(df.id == "005") & (df.track_name == "Ending")].iloc[0],
+    #         root_dir
+    #     )
+    # ]
 
     
 
