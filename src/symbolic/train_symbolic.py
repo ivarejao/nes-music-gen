@@ -181,9 +181,9 @@ def train_symbolic(
     ):
 
     if type == SYMBOLIC_TYPE.MIDI:
-        from src.dataset.dataset import NESMidiDataset as NESSymbDataset
+        from src.dataset.snes_datasets import NESMidiDataset as NESSymbDataset
     elif type == SYMBOLIC_TYPE.NLM:
-        from src.dataset.dataset import NESNlmDataset as NESSymbDataset
+        from src.dataset.snes_datasets import NESNlmDataset as NESSymbDataset
     else:
         raise TypeError("Invalid train_symbolic type")
 

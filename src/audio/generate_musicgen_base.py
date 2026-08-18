@@ -7,7 +7,7 @@ from torchaudio import save as save_audio
 
 from transformers import MusicgenProcessor, MusicgenForConditionalGeneration
 
-from src.dataset.dataset import NESMusicGenBaseDataset
+from src.dataset.snes_datasets import NESMusicGenBaseDataset
 
 
 logging.basicConfig(level=logging.INFO)

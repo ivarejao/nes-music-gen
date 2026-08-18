@@ -9,7 +9,6 @@ from torchaudio import save as save_audio
 
 from audiotools import AudioSignal
 from any2music.audio.tokenizers import DACCompressionModel, HFEncodecCompressionModel
-from any2music.audio.utils import load_mono_and_resample
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

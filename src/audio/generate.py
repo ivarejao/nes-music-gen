@@ -7,16 +7,17 @@ from torch.utils.data import DataLoader
 from any2music.audio.tokenizers import DACCompressionModel
 from any2music.audio.decoders.musicgen import MusicGenTransformer, MusicGenSize
 
-from src.dataset.dataset import NESAudioDataset
-
+from src.dataset.snes_datasets import NESAudioDataset
+from src.dataset.mtg_jamendo_dataset import MTGJamendoAudioDataset
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DATASET_ROOT = "/home/es119256/dados/datasets/nes_dataset"
+DATASET_ROOT_SNES = "/home/es119256/dados/datasets/nes_dataset"
+DATASET_ROOT_JAMENDO = '/home/es119256/dados/datasets/tokenized_mtg_jamendo'
 
 def get_xp(xp_dir):
-    xp_folder = os.path.join(xp_dir, "my_xp_audio_cfg")
+    xp_folder = os.path.join(xp_dir, "my_xp_cfg_mtg_jamendo")
     checkpoint_folder = os.path.join(xp_folder, "checkpoints")
     generation_folder = os.path.join(xp_folder, "generation_tests")
 
@@ -46,6 +47,7 @@ def collate(batch):
     return file_name_prefix_batch, input_tokens_batch, target_tokens_batch, meta_batch, txt_tokens_batch, txt_tokens_mask_batch
 
 def generate(
+        dataset_class,
         dataset_root:str, 
         epoch:int, 
         decoder_size:MusicGenSize,
@@ -84,7 +86,7 @@ def generate(
     logger.info(f"Loaded checkpoint from {checkpoint_path}")
 
     # Get dataloader
-    test_dataset = NESAudioDataset(
+    test_dataset = dataset_class(
         dataset_root=dataset_root, 
         split="test",
         num_codebooks=model.num_codebooks,
@@ -130,9 +132,11 @@ def generate(
                 path = os.path.join(generation_folder, file_name_prefix[i]+'.wav')
                 decoded_audio.write(path)
 
+
 if __name__ == "__main__":
     generate(
-        dataset_root=DATASET_ROOT,
+        dataset_class=MTGJamendoAudioDataset,
+        dataset_root=DATASET_ROOT_JAMENDO,
         epoch=50,
         decoder_size=MusicGenSize.SMALL
     )

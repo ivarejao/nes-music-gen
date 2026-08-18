@@ -10,7 +10,7 @@ from audiotools import AudioSignal
 from any2music.audio.tokenizers import DACCompressionModel, HFEncodecCompressionModel
 
 
-from src.dataset.dataset import NESTestTokenizersDataset
+from src.dataset.snes_datasets import NESTestTokenizersDataset
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

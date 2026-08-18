@@ -23,6 +23,7 @@ def tokenize_audio(file_path_wav:str, audio_secs:int, audio_tokenizer):
     max_audio_tokens = int(audio_tokenizer.frame_rate*audio_secs)
 
     # Keep preprocessing on CPU so dataloader workers can safely serialize results.
+    # DAC compress function already resamples
     audio_tensor = AudioSignal(file_path_wav, device='cuda').to_mono()[:, :, :max_audio_len].cuda()
 
     with torch.no_grad():

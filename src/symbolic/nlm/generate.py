@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 import any2music
 from any2music.text.decoders.textgen import TextGenTransformer, TextGenSize
 
-from src.dataset.dataset import NESNlmDataset
+from src.dataset.snes_datasets import NESNlmDataset
 
 PADDING_TKN = 0
 BOS_TKN = 1

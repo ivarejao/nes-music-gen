@@ -11,12 +11,11 @@ from torch.optim.lr_scheduler import LambdaLR
 from any2music.audio.tokenizers import DACCompressionModel
 from any2music.audio.decoders.musicgen import MusicGenTransformer, MusicGenSize
 
-from src.dataset.dataset import NESAudioDataset
 
 logger = logging.getLogger(__name__)
 
 def instantiate_xp(xp_dir):
-    xp_folder = os.path.join(xp_dir, "my_xp_cfg")
+    xp_folder = os.path.join(xp_dir, "my_xp_cfg_nes_5e-4_NO_sche")
     checkpoint_folder = os.path.join(xp_folder, "checkpoints")
     generation_folder = os.path.join(xp_folder, "generation_tests")
 
@@ -96,7 +95,7 @@ def evaluate_model_loss(model, dataloader, criterion):
             _, input_tokens, target_tokens, _, txt_tokens, txt_tokens_mask  = batch
 
             input_tokens = input_tokens.cuda().long()
-            txt_tokens = txt_tokens.cuda().long()
+            txt_tokens = txt_tokens.cuda()
             txt_tokens_mask = txt_tokens_mask.cuda()
 
             logits = model(src=txt_tokens, tgt=input_tokens, src_mask=txt_tokens_mask)
@@ -147,6 +146,7 @@ def run_generation_test(test_dataloader, model, audio_tokenizer, generation_fold
 
 
 def train_audio(
+        dataset_class,
         dataset_root:str, 
         epochs:int, 
         warmup_steps:int,
@@ -174,7 +174,7 @@ def train_audio(
     ).cuda()
 
     # Get dataloader
-    train_dataset = NESAudioDataset(
+    train_dataset = dataset_class(
         dataset_root=dataset_root, 
         split="train",
         num_codebooks=model.num_codebooks,
@@ -189,7 +189,7 @@ def train_audio(
         collate_fn=collate,
     )
 
-    test_dataset = NESAudioDataset(
+    test_dataset = dataset_class(
         dataset_root=dataset_root, 
         split="test",
         num_codebooks=model.num_codebooks,
@@ -207,7 +207,7 @@ def train_audio(
     # Train
     criterium = torch.nn.CrossEntropyLoss(ignore_index=model.pad_token_id) # Ignore the padding tokens in the loss calculation
     optim = torch.optim.AdamW(model.parameters(), lr=5e-4, betas=(0.9, 0.95), weight_decay=0.1)
-    scheduler =  get_cosine_with_warmup_scheduler(optim, warmup_steps, epochs*len(train_dataloader))
+    # scheduler =  get_cosine_with_warmup_scheduler(optim, warmup_steps, epochs*len(train_dataloader))
 
     train_losses = []
     test_losses = []
@@ -248,7 +248,7 @@ def train_audio(
 
             loss.backward()
             optim.step()
-            scheduler.step()
+            # scheduler.step()
 
         epoch_loss = sum(epoch_losses) / len(epoch_losses)
         train_losses.append(epoch_loss)
