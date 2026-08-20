@@ -13,16 +13,22 @@ class MTGJamendoAudioDataset(Dataset):
         self.num_codebooks = num_codebooks
         self.audio_secs = audio_secs
 
-        self.files_folder = os.path.join(dataset_root, split)
-        self.files = os.listdir(self.files_folder)
+        splits = [split] if split == "test" else [split, "validation"] 
+
+        self.files_paths = []
+        for split in splits:
+            files_folder = os.path.join(dataset_root, split)
+
+            for file in os.listdir(files_folder):
+                file_path = os.path.join(files_folder, file)
+                self.files_paths.append(file_path)
 
     def __len__(self):
-        return len(self.files)
+        return len(self.files_paths)
 
     def __getitem__(self, index):
-        file = self.files[index]
-        pre_comp_path = os.path.join(self.files_folder, file)
-        pre_comp = torch.load(pre_comp_path, map_location='cpu')
-        pre_comp['file_name_prefix'] = file.split('/')[0]
+        file_path = self.files_paths[index]
+        pre_comp = torch.load(file_path, map_location='cpu')
+        pre_comp['file_name_prefix'] = file_path.split('/')[-1][:-3]
 
         return pre_comp

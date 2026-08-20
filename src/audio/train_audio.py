@@ -4,6 +4,8 @@ import logging
 import json
 import random
 
+from tqdm import tqdm
+
 import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LambdaLR
@@ -15,7 +17,7 @@ from any2music.audio.decoders.musicgen import MusicGenTransformer, MusicGenSize
 logger = logging.getLogger(__name__)
 
 def instantiate_xp(xp_dir):
-    xp_folder = os.path.join(xp_dir, "my_xp_cfg_nes_5e-4_NO_sche")
+    xp_folder = os.path.join(xp_dir, "my_xp_cfg_jamendo_full_5e-4")
     checkpoint_folder = os.path.join(xp_folder, "checkpoints")
     generation_folder = os.path.join(xp_folder, "generation_tests")
 
@@ -152,6 +154,7 @@ def train_audio(
         warmup_steps:int,
         decoder_size:MusicGenSize,
         checkpoint_every:int = 10,
+        checkpoint_path = None,
         audio_secs:int=60,
         xp_dir = './'
     ):
@@ -207,16 +210,39 @@ def train_audio(
     # Train
     criterium = torch.nn.CrossEntropyLoss(ignore_index=model.pad_token_id) # Ignore the padding tokens in the loss calculation
     optim = torch.optim.AdamW(model.parameters(), lr=5e-4, betas=(0.9, 0.95), weight_decay=0.1)
-    # scheduler =  get_cosine_with_warmup_scheduler(optim, warmup_steps, epochs*len(train_dataloader))
+    scheduler =  get_cosine_with_warmup_scheduler(optim, warmup_steps, epochs*len(train_dataloader))
 
+    ckpt = None
+    best_test_loss = float("-inf")
     train_losses = []
     test_losses = []
+    current_epoch = 0
 
-    for epoch in range(epochs):
+    if checkpoint_path:
+        ckpt = torch.load(checkpoint_path, weights_only=False)
+
+        model_ckpt = ckpt["model"]
+        if hasattr(model_ckpt, 'state_dict'):
+            model_ckpt = model_ckpt.state_dict()
+        else:
+            model_ckpt = model_ckpt
+        model.load_state_dict(ckpt)
+
+        optim.load_state_dict(ckpt["optim"])
+
+        scheduler.load_state_dict(ckpt["scheduler"])
+
+        best_test_loss = ckpt["last_loss"]["test"]
+        train_losses = ckpt["loss_history"]["train"]
+        test_losses = ckpt["loss_history"]["test"]
+        current_epoch = ckpt["epoch"]
+
+
+    for epoch in range(current_epoch, epochs):
         if not model.training: model.train()
 
         epoch_losses = []
-        for update, batch in enumerate(train_dataloader):
+        for update, batch in enumerate(tqdm(train_dataloader, total=len(train_dataloader), desc=f"Epoch {epoch}")):
             _, input_tokens, target_tokens, _, txt_tokens, txt_tokens_mask = batch
 
             input_tokens = input_tokens.cuda().long()
@@ -243,12 +269,12 @@ def train_audio(
             # Compute loss and step
             loss = criterium(flat_logits, flat_targets)
             loss_item = loss.item()
-            logger.info(f"Epoch {epoch} -> Update {update} | Loss: {loss_item:.4f}")
+            logger.debug(f"Epoch {epoch} -> Update {update} | Loss: {loss_item:.4f}")
             epoch_losses.append(loss_item)
 
             loss.backward()
             optim.step()
-            # scheduler.step()
+            scheduler.step()
 
         epoch_loss = sum(epoch_losses) / len(epoch_losses)
         train_losses.append(epoch_loss)
@@ -259,8 +285,22 @@ def train_audio(
 
         logger.info(f"Epoch {epoch} Train Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f}")
 
-        if epoch % checkpoint_every == 0:
+        if epoch > 0 and epoch % checkpoint_every == 0:
         #     run_generation_test(test_dataloader, model, dac, generation_folder)
 
-            ckpt_path = os.path.join(checkpoint_folder, f'checkpoint_{epoch}.pth')
-            torch.save(model.state_dict(), ckpt_path)
+            save_ckpt_path = os.path.join(checkpoint_folder, f'checkpoint_{epoch}.pth')
+            ckpt = {
+                "model": model.state_dict(),
+                "optim": optim.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "epoch": epoch,
+                "last_loss": {
+                    "train": epoch_loss,
+                    "test": test_loss
+                },
+                "loss_history": {
+                    "train": train_losses,
+                    "test": test_losses
+                }
+            }
+            torch.save(ckpt, save_ckpt_path)

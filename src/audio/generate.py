@@ -17,9 +17,9 @@ DATASET_ROOT_SNES = "/home/es119256/dados/datasets/nes_dataset"
 DATASET_ROOT_JAMENDO = '/home/es119256/dados/datasets/tokenized_mtg_jamendo'
 
 def get_xp(xp_dir):
-    xp_folder = os.path.join(xp_dir, "my_xp_cfg_mtg_jamendo")
+    xp_folder = os.path.join(xp_dir, "my_xp_cfg_jamendo_full_5e-4")
     checkpoint_folder = os.path.join(xp_folder, "checkpoints")
-    generation_folder = os.path.join(xp_folder, "generation_tests")
+    generation_folder = os.path.join(xp_folder, "generation_tests_D")
 
     return xp_folder, checkpoint_folder, generation_folder
 
@@ -110,17 +110,21 @@ def generate(
 
             # Run generation
             with torch.inference_mode():
-                logger.info(f"Generating audio tokens for {file_name_prefix[i]}...")
+                logger.info(f"DDDD Generating audio tokens for {file_name_prefix[i]}...")
                 audio_tokens = model.generate(
                     max_new_tokens=model.max_seq_len,
                     src=conditioner,
                     src_mask=conditioner_mask,
-                    temperature=1, # < 1 -> eliminate randomness | = 1 -> the distribution learned | > 1 -> aproximate a uniform distribution
-                    cfg_scale=3.0,
-                    top_k=10
+                    temperature=2.0, # < 1, such as 1e-4 -> eliminate randomness | = 1 -> the distribution learned | > 1 -> aproximate a uniform distribution
+                    cfg_scale=2.0,
+                    top_k=250,
+                    top_p=0.9
                 )
 
-                print(f"Generate audio codes shape: {audio_tokens.shape}\n")
+                # C -> temp 1.5, top p 0.9
+                # D -> temp 2.0, top p 0.9
+
+                print(f"DDDD Generated audio codes shape: {audio_tokens.shape}\n")
 
                 # Decode back to audio
                 audio_tokens = torch.clamp(audio_tokens, min=0, max=dac.orig_vocab_size - 1)
@@ -128,7 +132,7 @@ def generate(
                 meta[i]['original_length'] = min(meta[i]['original_length'], total_generated_samples)
                 decoded_audio = dac.decode(audio_tokens.cpu(), meta[i])
 
-                logger.info(f"Decoded audio shape: {decoded_audio.shape}")
+                logger.info(f"DDDD Decoded audio shape: {decoded_audio.shape}")
                 path = os.path.join(generation_folder, file_name_prefix[i]+'.wav')
                 decoded_audio.write(path)
 
@@ -137,6 +141,6 @@ if __name__ == "__main__":
     generate(
         dataset_class=MTGJamendoAudioDataset,
         dataset_root=DATASET_ROOT_JAMENDO,
-        epoch=50,
+        epoch=20,
         decoder_size=MusicGenSize.SMALL
     )

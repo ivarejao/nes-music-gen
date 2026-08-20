@@ -12,25 +12,25 @@ DATASET_ROOT_NES = "/home/es119256/dados/datasets/nes_dataset"
 DATASET_ROOT_JAMENDO = '/home/es119256/dados/datasets/tokenized_mtg_jamendo'
 
 if __name__ == "__main__":
-    # train_audio(
-    #     dataset_class=MTGJamendoAudioDataset,
-    #     dataset_root = DATASET_ROOT_JAMENDO,
-    #     epochs = 100,
-    #     warmup_steps = 100,
-    #     audio_secs = 60,
-    #     decoder_size = MusicGenSize.SMALL,
-    #     checkpoint_every = 5
-    # )
-
     train_audio(
-        dataset_class=NESAudioDataset,
-        dataset_root = DATASET_ROOT_NES,
+        dataset_class=MTGJamendoAudioDataset,
+        dataset_root = DATASET_ROOT_JAMENDO,
         epochs = 100,
         warmup_steps = 350,
         audio_secs = 60,
         decoder_size = MusicGenSize.SMALL,
         checkpoint_every = 5
     )
+
+    # train_audio(
+    #     dataset_class=NESAudioDataset,
+    #     dataset_root = DATASET_ROOT_NES,
+    #     epochs = 100,
+    #     warmup_steps = 350,
+    #     audio_secs = 60,
+    #     decoder_size = MusicGenSize.SMALL,
+    #     checkpoint_every = 5
+    # )
 
     # train_symbolic(
     #     type = SYMBOLIC_TYPE.MIDI,
