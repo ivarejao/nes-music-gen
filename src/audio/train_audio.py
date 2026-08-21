@@ -122,15 +122,15 @@ def run_generation_test(test_dataloader, model, audio_tokenizer, generation_fold
         conditioner = txt_tokens[i].unsqueeze(0).cuda()
         conditioner_mask = txt_tokens_mask[i].unsqueeze(0).cuda()
 
-        # Run generation
         with torch.inference_mode():
             logger.info(f"Generating audio tokens for {file_name_prefix[i]}...")
             audio_tokens = model.generate(
                 max_new_tokens=model.max_seq_len,
                 src=conditioner,
                 src_mask=conditioner_mask,
-                temperature=1, # < 1 -> eliminate randomness | = 1 -> the distribution learned | > 1 -> aproximate a uniform distribution
-                top_k=250
+                temperature=2.0,
+                top_k=250,
+                top_p=0.9
             )
 
             print(f"Generate audio codes shape: {audio_tokens.shape}\n")
@@ -153,8 +153,7 @@ def train_audio(
         epochs:int, 
         warmup_steps:int,
         decoder_size:MusicGenSize,
-        checkpoint_every:int = 10,
-        checkpoint_path = None,
+        generate_every:int = -1,
         audio_secs:int=60,
         xp_dir = './'
     ):
@@ -218,25 +217,20 @@ def train_audio(
     test_losses = []
     current_epoch = 0
 
-    if checkpoint_path:
-        ckpt = torch.load(checkpoint_path, weights_only=False)
+    checkpoint_last_path = os.path.join(checkpoint_folder, f'checkpoint_last.pth')
+    checkpoint_best_path = os.path.join(checkpoint_folder, f'checkpoint_best.pth')
 
-        model_ckpt = ckpt["model"]
-        if hasattr(model_ckpt, 'state_dict'):
-            model_ckpt = model_ckpt.state_dict()
-        else:
-            model_ckpt = model_ckpt
-        model.load_state_dict(ckpt)
+    if os.path.isfile(checkpoint_best_path):
+        ckpt = torch.load(checkpoint_best_path, weights_only=False)
 
+        model.load_state_dict(ckpt["model"])
         optim.load_state_dict(ckpt["optim"])
-
         scheduler.load_state_dict(ckpt["scheduler"])
 
         best_test_loss = ckpt["last_loss"]["test"]
         train_losses = ckpt["loss_history"]["train"]
         test_losses = ckpt["loss_history"]["test"]
         current_epoch = ckpt["epoch"]
-
 
     for epoch in range(current_epoch, epochs):
         if not model.training: model.train()
@@ -285,22 +279,28 @@ def train_audio(
 
         logger.info(f"Epoch {epoch} Train Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f}")
 
-        if epoch > 0 and epoch % checkpoint_every == 0:
-        #     run_generation_test(test_dataloader, model, dac, generation_folder)
-
-            save_ckpt_path = os.path.join(checkpoint_folder, f'checkpoint_{epoch}.pth')
-            ckpt = {
-                "model": model.state_dict(),
-                "optim": optim.state_dict(),
-                "scheduler": scheduler.state_dict(),
-                "epoch": epoch,
-                "last_loss": {
-                    "train": epoch_loss,
-                    "test": test_loss
-                },
-                "loss_history": {
-                    "train": train_losses,
-                    "test": test_losses
-                }
+        ckpt = {
+            "model": model.state_dict(),
+            "optim": optim.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "epoch": epoch,
+            "last_loss": {
+                "train": epoch_loss,
+                "test": test_loss
+            },
+            "loss_history": {
+                "train": train_losses,
+                "test": test_losses
             }
-            torch.save(ckpt, save_ckpt_path)
+        }
+        torch.save(ckpt, checkpoint_last_path)
+
+        if test_loss >= best_test_loss:
+            best_test_loss = test_loss
+            torch.save(ckpt, checkpoint_best_path)
+
+        if generate_every > 0 and epoch % generate_every == 0:
+            generation_folder = os.path.join(generation_folder, f"epoch_{epoch}")
+            os.makedirs(generation_folder)
+
+            run_generation_test(test_dataloader, model, dac, generation_folder)

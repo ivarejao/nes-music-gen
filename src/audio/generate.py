@@ -110,7 +110,7 @@ def generate(
 
             # Run generation
             with torch.inference_mode():
-                logger.info(f"DDDD Generating audio tokens for {file_name_prefix[i]}...")
+                logger.info(f"Generating audio tokens for {file_name_prefix[i]}...")
                 audio_tokens = model.generate(
                     max_new_tokens=model.max_seq_len,
                     src=conditioner,
@@ -121,10 +121,7 @@ def generate(
                     top_p=0.9
                 )
 
-                # C -> temp 1.5, top p 0.9
-                # D -> temp 2.0, top p 0.9
-
-                print(f"DDDD Generated audio codes shape: {audio_tokens.shape}\n")
+                print(f"Generated audio codes shape: {audio_tokens.shape}\n")
 
                 # Decode back to audio
                 audio_tokens = torch.clamp(audio_tokens, min=0, max=dac.orig_vocab_size - 1)
@@ -132,7 +129,7 @@ def generate(
                 meta[i]['original_length'] = min(meta[i]['original_length'], total_generated_samples)
                 decoded_audio = dac.decode(audio_tokens.cpu(), meta[i])
 
-                logger.info(f"DDDD Decoded audio shape: {decoded_audio.shape}")
+                logger.info(f"Decoded audio shape: {decoded_audio.shape}")
                 path = os.path.join(generation_folder, file_name_prefix[i]+'.wav')
                 decoded_audio.write(path)
 

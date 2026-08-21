@@ -188,7 +188,6 @@ if __name__ == '__main__':
     validation_csv = select_samples(n=-1, split='validation', path='./mtg_jamendo_validation_full.csv')
 
     # Tokenize splits data
-    # tokenize(train_csv, save_folder='/home/es119256/dados/datasets/tokenized_mtg_jamendo/train')
-    # tokenize(test_csv, save_folder='/home/es119256/dados/datasets/tokenized_mtg_jamendo/test')
+    tokenize(train_csv, save_folder='/home/es119256/dados/datasets/tokenized_mtg_jamendo/train')
+    tokenize(test_csv, save_folder='/home/es119256/dados/datasets/tokenized_mtg_jamendo/test')
     tokenize(validation_csv, save_folder='/home/es119256/dados/datasets/tokenized_mtg_jamendo/validation')
-
