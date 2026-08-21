@@ -18,8 +18,7 @@ if __name__ == "__main__":
         epochs = 100,
         warmup_steps = 350,
         audio_secs = 60,
-        decoder_size = MusicGenSize.SMALL,
-        checkpoint_every = 5
+        decoder_size = MusicGenSize.SMALL
     )
 
     # train_audio(
