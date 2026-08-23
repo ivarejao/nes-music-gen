@@ -3,6 +3,8 @@ import math
 import logging
 import json
 import random
+import signal
+import sys
 
 from tqdm import tqdm
 
@@ -20,7 +22,7 @@ from any2music.audio.decoders.musicgen import MusicGenTransformer, MusicGenSize
 
 logger = logging.getLogger(__name__)
 
-XP_NAME = "my_xp_cfg_jamendo_full_176_teste_5e-4"
+XP_NAME = "xp_jamendo_full_5e-4"
 
 def instantiate_xp(xp_dir):
     xp_folder = os.path.join(xp_dir, XP_NAME)
@@ -161,6 +163,13 @@ def run_generation_test(test_dataloader, model, audio_tokenizer, generation_fold
 
     model.train()
 
+def cleanup_and_exit(signum, frame):
+    """Function triggered when program is terminated (including by Slurm)."""
+    logger.info(f"Terminating this job... (signum, frame): ({signum}, {frame})")
+
+    dist.destroy_process_group()
+    sys.exit(0)
+
 
 def _train_audio_worker(
         local_rank: int,
@@ -184,6 +193,8 @@ def _train_audio_worker(
             rank=local_rank,
             world_size=world_size
         )
+
+    signal.signal(signal.SIGTERM, cleanup_and_exit)
 
     torch.cuda.set_device(local_rank)
     is_master = (local_rank == 0)
@@ -263,7 +274,7 @@ def _train_audio_worker(
     optim = torch.optim.AdamW(model.parameters(), lr=5e-4, betas=(0.9, 0.95), weight_decay=0.1)
     scheduler = get_cosine_with_warmup_scheduler(optim, warmup_steps, epochs * len(train_dataloader))
 
-    best_test_loss = float("-inf")
+    best_test_loss = float("inf")
     train_losses = []
     test_losses = []
     current_epoch = 0
@@ -271,20 +282,20 @@ def _train_audio_worker(
     checkpoint_last_path = os.path.join(checkpoint_folder, f'checkpoint_last.pth')
     checkpoint_best_path = os.path.join(checkpoint_folder, f'checkpoint_best.pth')
 
-    if os.path.isfile(checkpoint_best_path):
-        ckpt = torch.load(checkpoint_best_path, map_location=f'cuda:{local_rank}', weights_only=False)
+    if os.path.isfile(checkpoint_last_path):
+        ckpt = torch.load(checkpoint_last_path, map_location=f'cuda:{local_rank}', weights_only=False)
 
         model.module.load_state_dict(ckpt["model"])
         optim.load_state_dict(ckpt["optim"])
         scheduler.load_state_dict(ckpt["scheduler"])
 
-        best_test_loss = ckpt["last_loss"]["test"]
+        best_test_loss = ckpt["best_test_loss"]
         train_losses = ckpt["loss_history"]["train"]
         test_losses = ckpt["loss_history"]["test"]
         current_epoch = ckpt["epoch"] + 1
 
         if is_master:
-            logger.info(f"Loaded checkpoint from {checkpoint_best_path} | Current Epoch: {current_epoch} | Best Test Loss {best_test_loss:.4f}")
+            logger.info(f"Loaded checkpoint from {checkpoint_last_path} | Current Epoch: {current_epoch} | Best Test Loss {best_test_loss:.4f}")
 
     dist.barrier()
 
@@ -302,7 +313,17 @@ def _train_audio_worker(
             input_tokens = input_tokens.to(local_rank).long()
             target_tokens = target_tokens.to(local_rank).long()
 
-            if random.random() < 0.3:
+            # Create a tensor to hold the decision
+            drop_decision = torch.zeros(1, device=local_rank)
+
+            if is_master:
+                if random.random() < 0.3:
+                    drop_decision[0] = 1.0
+
+            # Broadcast the master's decision to all GPUs
+            dist.broadcast(drop_decision, src=0)
+
+            if drop_decision.item() == 1.0:
                 drop_conditioning = True
                 txt_tokens = None
                 txt_tokens_mask = None
@@ -346,10 +367,7 @@ def _train_audio_worker(
                 "optim": optim.state_dict(),
                 "scheduler": scheduler.state_dict(),
                 "epoch": epoch,
-                "last_loss": {
-                    "train": epoch_loss,
-                    "test": test_loss
-                },
+                "best_test_loss": best_test_loss,
                 "loss_history": {
                     "train": train_losses,
                     "test": test_losses
@@ -357,8 +375,10 @@ def _train_audio_worker(
             }
             torch.save(ckpt, checkpoint_last_path)
 
-            if test_loss >= best_test_loss:
+            if test_loss <= best_test_loss:
+                logger.info(f"Saved BEST checkpoint to {checkpoint_best_path} | Current Epoch: {epoch} | Best Test Loss {test_loss:.4f}")
                 best_test_loss = test_loss
+                ckpt["best_test_loss"] = best_test_loss
                 torch.save(ckpt, checkpoint_best_path)
 
             if generate_every > 0 and epoch % generate_every == 0:

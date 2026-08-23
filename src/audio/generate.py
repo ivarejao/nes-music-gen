@@ -17,9 +17,9 @@ DATASET_ROOT_SNES = "/home/es119256/dados/datasets/nes_dataset"
 DATASET_ROOT_JAMENDO = '/home/es119256/dados/datasets/tokenized_mtg_jamendo'
 
 def get_xp(xp_dir):
-    xp_folder = os.path.join(xp_dir, "my_xp_cfg_jamendo_full_5e-4")
+    xp_folder = os.path.join(xp_dir, "my_xp_cfg_jamendo_full_176_5e-4")
     checkpoint_folder = os.path.join(xp_folder, "checkpoints")
-    generation_folder = os.path.join(xp_folder, "generation_tests_D")
+    generation_folder = os.path.join(xp_folder, "generation_tests_15_t2_cfg2_k250_p90")
 
     return xp_folder, checkpoint_folder, generation_folder
 
@@ -49,7 +49,6 @@ def collate(batch):
 def generate(
         dataset_class,
         dataset_root:str, 
-        epoch:int, 
         decoder_size:MusicGenSize,
         audio_secs:int=60,
         xp_dir = './'
@@ -57,7 +56,7 @@ def generate(
 
     # Instanciate xp
     xp_folder, checkpoint_folder, generation_folder = get_xp(xp_dir)
-    checkpoint_path = os.path.join(checkpoint_folder, f'checkpoint_{epoch}.pth')
+    checkpoint_path = os.path.join(checkpoint_folder, f'checkpoint_best.pth')
 
     # Get models
     dac = DACCompressionModel.get_pretrained("44khz", device='cpu').eval()
@@ -75,14 +74,9 @@ def generate(
 
 
     logger.info(f"Loading checkpoint from {checkpoint_path}")
-    full_loaded_object = torch.load(checkpoint_path, weights_only=False)
+    ckpt = torch.load(checkpoint_path, weights_only=False)
 
-    if hasattr(full_loaded_object, 'state_dict'):
-        ckpt = full_loaded_object.state_dict()
-    else:
-        ckpt = full_loaded_object
-
-    model.load_state_dict(ckpt)
+    model.load_state_dict(ckpt["model"])
     logger.info(f"Loaded checkpoint from {checkpoint_path}")
 
     # Get dataloader
@@ -130,6 +124,10 @@ def generate(
                 decoded_audio = dac.decode(audio_tokens.cpu(), meta[i])
 
                 logger.info(f"Decoded audio shape: {decoded_audio.shape}")
+
+                if not os.path.isdir(generation_folder):
+                    os.makedirs(generation_folder)
+
                 path = os.path.join(generation_folder, file_name_prefix[i]+'.wav')
                 decoded_audio.write(path)
 
@@ -138,6 +136,5 @@ if __name__ == "__main__":
     generate(
         dataset_class=MTGJamendoAudioDataset,
         dataset_root=DATASET_ROOT_JAMENDO,
-        epoch=20,
         decoder_size=MusicGenSize.SMALL
     )
