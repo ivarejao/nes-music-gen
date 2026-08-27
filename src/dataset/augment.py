@@ -22,10 +22,10 @@ import wave
 from pathlib import Path
 
 import miditoolkit
-from miditoolkit.midi.containers import Instrument, TempoChange, Note
-from tqdm import tqdm
 
 from src.utils import setup_logger
+
+
 
 
 DESCRIPTOR_API_URL = "http://localhost:8000"
@@ -39,14 +39,18 @@ LOGGING_SPECS = {
 
 
 # Range of transposition intervals (in semi-tones)
-transpose_intervals = range(-4, 5)
+# transpose_intervals = range(-4, 5)
 
-# Range of strech factors
-stretch_factors = [0.8, 0.9, 1.0]
+# # Range of strech factors
+# stretch_factors = [0.8, 0.9, 1.0]
 
 # debug
 transpose_intervals = range(-1, 2)  
-stretch_factors = [0.8, 0.9, 1.0]
+stretch_factors = [0.8, 1.0, 1.1]
+
+class TrackAdapter(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        return "[%s] %s" % (self.extra["track"], msg), kwargs
 
 def _serializable(field):
     return [str(i) for i in field] if isinstance(field, list) else str(field)
@@ -83,7 +87,7 @@ def crop_wav(input_path, seconds=60, output_path=None):
     with wave.open(output_path, 'wb') as o:
         o.setparams(params)
         o.writeframes(data)
-    print("Wav signal cropped on {}".format(output_path))
+    # print("Wav signal cropped on {}".format(output_path))
 
 
 def get_wav_duration(file_path):
@@ -97,6 +101,8 @@ def get_wav_duration(file_path):
         return duration
 
 def convert(input_midi_path : str, output_dir : str, root_dir : str, convertion_key : str):
+
+    logger = logging.getLogger(LOGGING_SPECS["name"])
 
     input_midi_path = Path(input_midi_path)
     output_dir = Path(output_dir)
@@ -117,10 +123,10 @@ def convert(input_midi_path : str, output_dir : str, root_dir : str, convertion_
     response = requests.post(endpoint, json=params)
     if response.status_code == 200:
         output_file_path = response.json()["file_path"]
-        print("File {} sythesized onto file {}".format(os.path.basename(input_midi_path), output_file_path))
+        logger.info("File {} sythesized onto file {}".format(os.path.basename(input_midi_path), output_file_path))
         return output_file_path
     else:
-        print("Error on synthesis of file {}\n{}".format(input_midi_path, response.json()["error"]))
+        logger.info("Error on synthesis of file {}\n{}".format(input_midi_path, response.json()["error"]))
         return None
 
 def call_madmom(endpoint: str, tracks: list[str], out_dir: str | None = None, timeout: int = 300) -> dict:
@@ -141,8 +147,8 @@ def call_madmom(endpoint: str, tracks: list[str], out_dir: str | None = None, ti
     if out_dir is not None:
         payload["out_dir"] = _serializable(out_dir)
     
-    print(tracks)
-    print(payload, f"{DESCRIPTOR_API_URL}/{endpoint}")
+    # print(tracks)
+    # print(payload, f"{DESCRIPTOR_API_URL}/{endpoint}")
     resp = requests.post(f"{DESCRIPTOR_API_URL}/{endpoint}", json=payload, timeout=timeout)
     resp.raise_for_status()
     return resp.json()
@@ -201,10 +207,12 @@ def worker(reference : pd.Series, root_dir : str, log_queue : mp.Queue):
     # logger = setup_logger(**LOGGING_SPECS, queue=log_queue)
 
     queue_handler = logging.handlers.QueueHandler(log_queue)
-    logger = logging.getLogger(LOGGING_SPECS["name"])
-    logger.setLevel(logging.INFO)
-    logger.addHandler(queue_handler)
+    base_logger = logging.getLogger(LOGGING_SPECS["name"])
+    base_logger.handlers.clear()        # drop inherited console+file handlers
+    base_logger.setLevel(logging.INFO)
+    base_logger.addHandler(queue_handler)
 
+    logger = TrackAdapter(base_logger, {"track": reference["id"] + "_" + reference["track_name"]})
 
     logger.info("Starting augmentation of " + str(reference["file_path_midi"]))
 
@@ -218,6 +226,9 @@ def worker(reference : pd.Series, root_dir : str, log_queue : mp.Queue):
     new_samples = {}
 
     for (interval, factor) in variations:
+        if interval == 0 and factor == 1.0:
+            # We dont need this variation
+            continue
 
         start_time = time.perf_counter()
         # create descriptions for each modification
@@ -346,7 +357,7 @@ if __name__ == '__main__':
 
     listener = logging.handlers.QueueListener(
         log_queue, 
-        logger.handlers,
+        *logger.handlers,
         respect_handler_level=True
     )
     listener.start()
@@ -357,8 +368,10 @@ if __name__ == '__main__':
     df["id"] = df.id.map('{:03d}'.format)
     df = df[~(df.split == "test")] # TODO: remove this when running
     df = df[df.has_midi]
+    df = df[df.duration_s <= 60]
 
     print(root_dir)
+    logger.info("Augmentation of {} tracks".format(df.shape[0]))
 
     # collect
     data = []
@@ -392,5 +405,5 @@ if __name__ == '__main__':
     #     new_samples = proc_one(*sample)
     #     augmented_data.extend(new_samples)
     # run, multi-thread
-    pool = mp.Pool()
+    pool = mp.Pool(processes=10) # NOTE: Hardcoded for g15 notebook
     pool.starmap(worker, data)
