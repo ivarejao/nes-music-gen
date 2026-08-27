@@ -12,3 +12,8 @@ services:
           - "8000:8000"
     environment:
         - DATA_MOUNT_POINT
+    # NOTE: Hardcoded for augmentation g15
+    deploy:
+      resources:
+        limits:
+          cpus: "4"

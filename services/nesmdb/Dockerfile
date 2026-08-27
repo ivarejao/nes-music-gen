@@ -50,4 +50,5 @@ RUN python setup.py install
 # directory structure
 RUN mv nesmdb nesmdb_src
 
-CMD python app.py
+# NOTE: Change -w for your own machine, i left it for my g15 machine
+CMD ["gunicorn", "-w", "8", "-b", "0.0.0.0:5555", "--timeout", "3600", "app:app"]

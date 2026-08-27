@@ -11,3 +11,8 @@ services:
             - $DATA_MOUNT_POINT:/data
         environment:
             - DATA_MOUNT_POINT
+        # NOTE: Hardcoded for augmentation g15
+        deploy:
+            resources:
+                limits:
+                    cpus: "8"
