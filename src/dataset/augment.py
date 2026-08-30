@@ -1,4 +1,3 @@
-#
 # Clean MIDI data to:
 # 1) Remove all pieces that are not in common time (i.e., 4/4)
 # 2) Remove all non-piano tracks

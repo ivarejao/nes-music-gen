@@ -13,12 +13,14 @@ dependencies = [
     "librosa>=0.11.0",
     "miditok>=3.0.6.post1",
     "miditoolkit>=1.0.1",
+    "music21>=9.9.2",
     "numpy<2.4",
     "pandas>=2.3.3",
     "pypianoroll>=1.0.4",
     "requests>=2.34.2",
     "seaborn>=0.13.2",
     "tokenizers==0.23.1",
+    "tqdm>=4.67.1",
 ]
 
 [tool.setuptools]

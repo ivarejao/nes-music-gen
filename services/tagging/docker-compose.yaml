@@ -1,0 +1,17 @@
+services:
+  midicaps:
+    build: .
+    container_name: tags_generation
+    volumes:
+      - ./midi_input:/app/midi_input
+      - ./output:/app/output
+      - ./config.cfg:/app/config.cfg
+      # for dev
+      - ./generate_tags.py:/app/generate_tags.py
+    volumes:
+      - $DATA_MOUNT_POINT:/app/dataset
+    environment:
+      - DATA_MOUNT_POINT
+    command: bash
+    stdin_open: true
+    tty: true
