@@ -5,6 +5,7 @@ import json
 import random
 import signal
 import sys
+import typing as tp
 
 from tqdm import tqdm
 
@@ -22,7 +23,7 @@ from any2music.audio.decoders.musicgen import MusicGenTransformer, MusicGenSize
 
 logger = logging.getLogger(__name__)
 
-XP_NAME = "xp_jamendo_full_5e-4"
+XP_NAME = "xp_audio_nes_dset_v0dot7_from_scratch"
 
 def instantiate_xp(xp_dir):
     xp_folder = os.path.join(xp_dir, XP_NAME)
@@ -135,7 +136,7 @@ def run_generation_test(test_dataloader, model, audio_tokenizer, generation_fold
     batch = next(iter_loader)
     file_name_prefix, _, _, meta, txt_tokens, txt_tokens_mask = batch
 
-    for i in range(len(file_name_prefix)):
+    for i in range(5):
         conditioner = txt_tokens[i].unsqueeze(0).to(local_rank)
         conditioner_mask = txt_tokens_mask[i].unsqueeze(0).to(local_rank)
 
@@ -157,7 +158,7 @@ def run_generation_test(test_dataloader, model, audio_tokenizer, generation_fold
             meta[i]['original_length'] = min(meta[i]['original_length'], total_generated_samples)
             decoded_audio = audio_tokenizer.decode(audio_tokens.cpu(), meta[i])
 
-            logger.info(f"Decoded audio shape: {decoded_audio.shape}")
+            logger.info(f"Rank {local_rank} decoded audio shape: {decoded_audio.shape}")
             path = os.path.join(generation_folder, file_name_prefix[i]+'.wav')
             decoded_audio.write(path)
 
@@ -181,6 +182,7 @@ def _train_audio_worker(
         decoder_size: MusicGenSize,
         generate_every: int,
         audio_secs: int,
+        continue_from: tp.Optional[str],
         xp_dir: str
     ):
     # Initialize DDP process group for this rank
@@ -241,7 +243,7 @@ def _train_audio_worker(
     )
     train_dataloader = DataLoader(
         train_dataset,
-        batch_size=12,
+        batch_size=8,
         sampler=train_sampler,
         num_workers=4,
         pin_memory=True,
@@ -262,7 +264,7 @@ def _train_audio_worker(
     )
     test_dataloader = DataLoader(
         test_dataset,
-        batch_size=12,
+        batch_size=8,
         sampler=test_sampler,
         num_workers=4,
         pin_memory=True,
@@ -296,6 +298,13 @@ def _train_audio_worker(
 
         if is_master:
             logger.info(f"Loaded checkpoint from {checkpoint_last_path} | Current Epoch: {current_epoch} | Best Test Loss {best_test_loss:.4f}")
+
+    if current_epoch == 0 and continue_from:
+        ckpt = torch.load(continue_from, map_location=f'cuda:{local_rank}', weights_only=False)
+        model.module.load_state_dict(ckpt["model"])
+
+        if is_master:
+            logger.info(f"Model was initialized with weights from {continue_from}")
 
     dist.barrier()
 
@@ -358,9 +367,15 @@ def _train_audio_worker(
         test_loss = evaluate_model_loss(model, test_dataloader, criterium, local_rank)
         test_losses.append(test_loss)
 
+
         if is_master:
             save_loss_history(xp_folder, train_losses, test_losses)
-            logger.info(f"Epoch {epoch} Train Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f}")
+
+            is_best = test_loss <= best_test_loss
+            if is_best:
+                best_test_loss = test_loss
+
+            logger.info(f"Epoch {epoch} Train Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f} | Best Test  Loss: {best_test_loss:.4f}")
 
             ckpt = {
                 "model": model.module.state_dict(),
@@ -375,10 +390,8 @@ def _train_audio_worker(
             }
             torch.save(ckpt, checkpoint_last_path)
 
-            if test_loss <= best_test_loss:
+            if is_best:
                 logger.info(f"Saved BEST checkpoint to {checkpoint_best_path} | Current Epoch: {epoch} | Best Test Loss {test_loss:.4f}")
-                best_test_loss = test_loss
-                ckpt["best_test_loss"] = best_test_loss
                 torch.save(ckpt, checkpoint_best_path)
 
             if generate_every > 0 and epoch % generate_every == 0:
@@ -399,6 +412,7 @@ def train_audio(
         decoder_size: MusicGenSize,
         generate_every: int = -1,
         audio_secs: int = 60,
+        continue_from=None,
         xp_dir = './'
     ):
     visible_gpus = torch.cuda.device_count()
@@ -419,6 +433,7 @@ def train_audio(
             decoder_size,
             generate_every,
             audio_secs,
+            continue_from,
             xp_dir
         )
     else:
@@ -435,6 +450,7 @@ def train_audio(
                 decoder_size,
                 generate_every,
                 audio_secs,
+                continue_from,
                 xp_dir
             ),
             nprocs=visible_gpus,

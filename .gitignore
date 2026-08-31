@@ -227,3 +227,4 @@ cmd/
 *.pth
 *.wav
 *.mp3
+*.png

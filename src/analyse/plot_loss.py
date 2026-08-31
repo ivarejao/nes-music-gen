@@ -1,11 +1,9 @@
 import os
 import json
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
 
-DATASET_ROOT = "/home/es119256/dados/datasets/nes_dataset"
 
-xp_folder = os.path.join('./', "my_xp_cfg_nlm")
+xp_folder = os.path.join('./', "xp_jamendo_full_5e-4")
 fig_path = os.path.join(xp_folder, "losses.png")
 data_path = os.path.join(xp_folder, "losses.json")
 
@@ -26,10 +24,10 @@ plt.plot(epochs, test_loss, label='Test Loss', color='orange')
 
 # --- 3. OVERFITTING DETECTION & ANNOTATION ---
 overfit_epoch = None
-for i in range(1, len(test_loss)):
-    if test_loss[i] > test_loss[i-1]:
-        overfit_epoch = i + 1  # +1 for 1-indexed epochs
-        break
+# for i in range(1, len(test_loss)):
+#     if test_loss[i] > test_loss[i-1]:
+#         overfit_epoch = i + 1  # +1 for 1-indexed epochs
+#         break
 
 if overfit_epoch is not None:
     plt.annotate(
@@ -52,7 +50,7 @@ ax = plt.gca()
 
 # Generate clean base ticks every 10 epochs
 tick_spacing = 5 
-ticks = list(range(0, max(epochs) + 1, tick_spacing))
+ticks = list(range(1, max(epochs) + 1, tick_spacing))
 
 # Inject the exact overfitting epoch and clear out nearby collisions
 if overfit_epoch is not None:

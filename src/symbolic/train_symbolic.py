@@ -5,6 +5,8 @@ import json
 import random
 from enum import Enum
 
+from tqdm import tqdm
+
 import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LambdaLR
@@ -22,7 +24,7 @@ class SYMBOLIC_TYPE(Enum):
 logger = logging.getLogger(__name__)
 
 def instantiate_xp(xp_dir, type:SYMBOLIC_TYPE):
-    xp_folder = os.path.join(xp_dir, f"my_xp_cfg_{type.value}")
+    xp_folder = os.path.join(xp_dir, f"xp_{type.value}_nes_dset_v0dot7")
     checkpoint_folder = os.path.join(xp_folder, "checkpoints")
     generation_folder = os.path.join(xp_folder, "generation_tests")
 
@@ -176,7 +178,6 @@ def train_symbolic(
         epochs:int, 
         warmup_steps:int,
         decoder_size:TextGenSize,
-        checkpoint_every:int = 10,
         xp_dir = './'
     ):
 
@@ -232,14 +233,36 @@ def train_symbolic(
     optim = torch.optim.AdamW(model.parameters(), lr=5e-4, betas=(0.9, 0.95), weight_decay=0.1)
     scheduler =  get_cosine_with_warmup_scheduler(optim, warmup_steps, epochs*len(train_dataloader))
 
+    best_test_loss = float("inf")
     train_losses = []
     test_losses = []
+    current_epoch = 0
 
-    for epoch in range(epochs):
+    checkpoint_last_path = os.path.join(checkpoint_folder, f'checkpoint_last.pth')
+    checkpoint_best_path = os.path.join(checkpoint_folder, f'checkpoint_best.pth')
+
+    if os.path.isfile(checkpoint_last_path):
+        ckpt = torch.load(checkpoint_last_path, map_location=f'cuda:0', weights_only=False)
+
+        model.load_state_dict(ckpt["model"])
+        optim.load_state_dict(ckpt["optim"])
+        scheduler.load_state_dict(ckpt["scheduler"])
+
+        best_test_loss = ckpt["best_test_loss"]
+        train_losses = ckpt["loss_history"]["train"]
+        test_losses = ckpt["loss_history"]["test"]
+        current_epoch = ckpt["epoch"] + 1
+
+        logger.info(f"Loaded checkpoint from {checkpoint_last_path} | Current Epoch: {current_epoch} | Best Test Loss {best_test_loss:.4f}")
+
+
+    for epoch in range(current_epoch, epochs):
         if not model.training: model.train()
 
         epoch_losses = []
-        for update, batch in enumerate(train_dataloader):
+        iterator = tqdm(train_dataloader, total=len(train_dataloader), desc=f"Epoch {epoch}")
+
+        for update, batch in enumerate(iterator):
             _, input_tokens, target_tokens, txt_tokens, txt_tokens_mask = batch
 
             input_tokens = input_tokens.cuda().long()
@@ -265,7 +288,6 @@ def train_symbolic(
             # Compute loss and step
             loss = criterium(flat_logits, flat_targets)
             loss_item = loss.item()
-            logger.info(f"Epoch {epoch} -> Update {update} | Loss: {loss_item:.4f}")
             epoch_losses.append(loss_item)
 
             loss.backward()
@@ -279,10 +301,26 @@ def train_symbolic(
         test_losses.append(test_loss)
         save_loss_history(xp_folder, train_losses, test_losses)
 
-        logger.info(f"Epoch {epoch} Train Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f}")
+        is_best = test_loss <= best_test_loss
+        if is_best:
+            best_test_loss = test_loss
 
-        if epoch % checkpoint_every == 0:
-        #     run_generation_test(test_dataloader, model, dac, generation_folder)
+        logger.info(f"Epoch {epoch} Train Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f} | Best Test  Loss: {best_test_loss:.4f}")
 
-            ckpt_path = os.path.join(checkpoint_folder, f'checkpoint_{epoch}.pth')
-            torch.save(model.state_dict(), ckpt_path)
+        ckpt = {
+            "model": model.state_dict(),
+            "optim": optim.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "epoch": epoch,
+            "best_test_loss": best_test_loss,
+            "loss_history": {
+                "train": train_losses,
+                "test": test_losses
+            }
+        }
+        torch.save(ckpt, checkpoint_last_path)
+
+        if is_best:
+            logger.info(f"Saved BEST checkpoint to {checkpoint_best_path} | Current Epoch: {epoch} | Best Test Loss {test_loss:.4f}")
+            ckpt["best_test_loss"] = best_test_loss
+            torch.save(ckpt, checkpoint_best_path)
