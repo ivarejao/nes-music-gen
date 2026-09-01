@@ -45,7 +45,7 @@ LOGGING_SPECS = {
 
 # debug
 transpose_intervals = range(-1, 2)  
-stretch_factors = [0.8, 1.0, 1.1]
+stretch_factors = [0.8, 1.0, 1.2]
 
 class TrackAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):

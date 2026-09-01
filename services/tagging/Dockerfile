@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y \
     git \
     ffmpeg \
     libsndfile1 \
-    fluid-soundfont-gm \
     build-essential \
     vim \
     && rm -rf /var/lib/apt/lists/*
@@ -16,16 +15,11 @@ RUN apt-get update && apt-get install -y \
 # Set the working directory
 WORKDIR /app
 
-# Clone the MidiCaps repository
-RUN git clone https://github.com/AMAAI-Lab/MidiCaps.git .
+COPY requirements.txt requirements.txt
 
-# I needed to downgrade the version of the music in order to be
-# compatible with the python3.9
-RUN sed -i s/music21==9.1.0/music21==8.3.0/g requirements.txt
-
-# Install Python requirements
+# Install numpy in order to be compatible with vamp installation
 RUN pip install numpy==1.26.4
 RUN pip install --no-cache-dir -r requirements.txt
 
 #  Default command runs the feature extraction pipeline
-CMD bash
+CMD python3 generate_tags.py --dataset-path /app/dataset/

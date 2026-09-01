@@ -9,7 +9,6 @@ from music21 import midi
 import os
 from time import time
 from chord_extractor.extractors import Chordino
-import configparser
 import json
 import argparse
 import numpy as np
@@ -17,14 +16,47 @@ import mido
 import pandas as pd
 
 import logging
-import multiprocessing as mp
-
+from tqdm import tqdm
 
 LOGGING_SPECS = {
-    "name":"Augment", 
-    "log_file":"augment.log", 
+    "name":"Tagger", 
+    "log_file":"logs/tagging.log", 
     "level":logging.DEBUG
 }
+
+
+def setup_logger(name, log_file=None, level=logging.INFO, queue=None):
+    """Sets up a logger that writes messages to a file."""
+    
+    # 1. Create a custom logger
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+
+    formatter = logging.Formatter('[%(asctime)s] %(name)s [%(levelname)s] %(message)s')
+    # 2. Create console handlers
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(level) 
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    if log_file:
+        file_handler = logging.FileHandler(log_file, mode='a')
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(level)
+        logger.addHandler(file_handler)
+
+    # support for multiprocesing logging
+    if queue:
+        logger.addHandler(queue)
+
+    return logger
+
+
+def format_hms(seconds):
+    hours, remainder = divmod(int(seconds), 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}"
+
 
 def get_final_inst_list(midi_file_path):
     INSTRUMENT_NAMES = {
@@ -83,9 +115,10 @@ def get_duration(file):
 
 def find_most_repeating_sequence(chords_list, sequence_length):
     sequences = [tuple(chords_list[i:i+sequence_length]) for i in range(len(chords_list) - sequence_length + 1)]
+
     delete_index=[]
     for i,seqs in enumerate(sequences):
-        if seqs [0]==seqs[-1]:
+        if seqs[0] == seqs[-1]:
             delete_index.append(i)
     for i in reversed(delete_index):
         sequences.pop(i)
@@ -118,32 +151,40 @@ def give_me_final_seq(chords):
             return sequence_4, count_4
     else:
         return sequence_3, count_3
+    
+def parse_tags(tags: dict) -> str:
 
-def parse_tags(tags : dict) -> str:
-    description = ""
-    description += tags["file_game_name"] + "; "
-    description += "-".join(tags["genre-wiki"]) + "; "
-    description += tags["key"] + "; "
-    description += ", ".join(tags["tempo"]) + "; "
-    description += tags["time_signature"] + "; "
-    description += ", ".join(tags["duration"]) + "; "
-    description += str(tags["instruments"]) + "; "
-    description += ", ".join(tags["chord_summary"]) + "; "
-    description += str(tags["chords"])
+    def _stringfy(field):
+        return ", ".join(map(str, field))
 
-    return description
+    # ensure None fields are strings
+    tags = {k: ("" if v is None else v) for k, v in tags.items()}
 
-def generate_tags(track_metadata : pd.Series, dataset_path : str | Path, chord_estimator):
+    return "; ".join((
+        tags["file_game_name"],
+        "-".join(tags["genre-wiki"]),
+        tags["key"],
+        _stringfy(tags["tempo"]),
+        tags["time_signature"],
+        _stringfy(tags["duration"]),
+        str(tags["instruments"]),
+        _stringfy(tags["chord_summary"]),
+        str(tags["chords"]),
+    ))
+
+def generate_tags(track_metadata : pd.Series, dataset_path : Path, chord_estimator):
     file =  Path(dataset_path) / track_metadata["file_path_midi"]
     audio_file = Path(dataset_path) / track_metadata["file_path_wav"]
-    tags_target_file = Path(dataset_path) / track_metadata["music_track_description"]
+    music_description_file = Path(dataset_path) / track_metadata["id"] / track_metadata["track_name"] / (track_metadata["file_name_prefix"] + "_music_track_description.md")
 
-    print("Extracting {}".format(os.path.basename(file)))
+    logger = logging.getLogger(LOGGING_SPECS["name"])
+
+    logger.info("Extracting {}".format(os.path.basename(file)))
     midi = read_midi(file)        
 
     if (not audio_file or not os.path.exists(audio_file)) or \
         (not file or not os.path.exists(file)):
-        print("Files of {} wasnt detected".format(os.path.basename(file)))
+        logger.warning("Files of {} wasnt detected".format(track_metadata["file_name_prefix"]))
         return 
     
     # AUDIO Features
@@ -172,10 +213,8 @@ def generate_tags(track_metadata : pd.Series, dataset_path : str | Path, chord_e
     try:
         fulllist=get_final_inst_list(file)
     except Exception as e:
-        print(e)
-        print('skipped instruments')
-        i+=1
-        print(i)
+        logger.warning(e)
+        logger.warning('skipped instruments')
         fulllist=[]
 
     #key
@@ -235,7 +274,7 @@ def generate_tags(track_metadata : pd.Series, dataset_path : str | Path, chord_e
     #sort nicely
     tags={}
     tags['file_game_name']=track_metadata["file_game_name"]
-    tags['genre-wiki'] = track_metadata['genre-wiki']
+    tags['genre-wiki'] = eval(track_metadata['genre_wiki']) if track_metadata["genre_wiki"] is not np.nan else []
     tags['console'] = "NES"
     tags['key']=key
     tags['tempo']=[bpm,tempo_cap]
@@ -247,111 +286,46 @@ def generate_tags(track_metadata : pd.Series, dataset_path : str | Path, chord_e
 
     tags_description = parse_tags(tags)
 
-    with open(tags_target_file, "w") as f:
+    with open(music_description_file, "w") as f:
         f.write(tags_description)
 
-    # TODO: save .csv of the new metadata
-    # Add the tags into the metadata
+    tags_target_file = music_description_file.with_name(track_metadata["file_name_prefix"] + "_tags.json")
+    with open(tags_target_file, "w") as f:
+        json.dump(tags, f)
 
-    print("Tags sucessufully created at {}".format(track_metadata["music_track_description"]))
+    logger.info("Description created at {}".format(music_description_file))
+    logger.info("Tags sucessufully created at {}".format(tags_target_file))
 
-    
-def main():
-    parser = argparse.ArgumentParser(description="Extract tags from a dataset.")
-    parser.add_argument(
-        "--goon", action="store_true", 
-        default=False,help="Resume extraction from the (unfinished) output file, backtracking 5 samples."
-        )
-    parser.add_argument(
-        '--config', type=str, 
-        help='Path to the configuration file'
-        )
-    args = parser.parse_args()
-    config = configparser.ConfigParser()
-    if args.config:
-        config.read(args.config)
-    else:
-        config.read('config.cfg')  # default config file
-    t=time()
-    chord_estimator = Chordino()
-
-    location_file=config['DEFAULT'].get('location_file',None)
-    file_list=[]
-    audio_list = []
-    with open(location_file,'r') as jsonfile:
-        for row in jsonfile:
-            a=json.loads(row)
-            file_list.append(a['name'])
-            audio_list.append(a["audio"])
-    i=0
-    for file, audio_file in zip(file_list, audio_list):
-        generate_tags(file, audio_file, chord_estimator)
-
-    print(str(time()-t))
 
 def main():
         # Parse arguments
-    parser = argparse.ArgumentParser(description='augment.py')
+    parser = argparse.ArgumentParser(description='generate_tags.py')
     parser.add_argument('--dataset-path', type=str, required=True)
     args = parser.parse_args()
 
-    root_dir = Path(args.dataset_path).absolute()
+    start_time = time()
+    dataset_path = Path(args.dataset_path).absolute()
 
     # setup for multiprocessing logging
     logger = setup_logger(**LOGGING_SPECS)
-    manager = mp.Manager()
-    log_queue = manager.Queue() # specific queue that will be responsible for logging into file
 
-    listener = logging.handlers.QueueListener(
-        log_queue, 
-        *logger.handlers,
-        respect_handler_level=True
-    )
-    listener.start()
+    chord_estimator = Chordino()
 
-    # TODO: add NLMHandler and MIDIHandler loggers into the main logger
-
-    df = pd.read_csv(root_dir / "nes_metadata.csv")
-    df["id"] = df.id.map('{:03d}'.format)
-    df = df[~(df.split == "test")] # TODO: remove this when running
+    df = pd.read_csv(dataset_path / "nes_metadata.csv", dtype={"id": str})
     df = df[df.has_midi]
     df = df[df.duration_s <= 60]
 
-    print(root_dir)
-    logger.info("Augmentation of {} tracks".format(df.shape[0]))
+    print(dataset_path)
+    for (_, sample) in tqdm(df.iterrows(), desc="Tags generation "):
+        generate_tags(sample, dataset_path, chord_estimator)
 
-    # collect
-    data = []
-    for idx, sample in df.iterrows():
-        # append
-        data.append([sample, root_dir, log_queue])
-        # if idx > 20:
-            # break
+    elapsed = time() - start_time
+    logger.info(f"Tag generation completed in {format_hms(elapsed)} seconds")
+    print(f"Tag generation completed in {format_hms(elapsed)} seconds")
 
-    # data = [[
-    #     df[(df.id == "005") & (df.track_name == "Ending")].iloc[0],
-    #     root_dir
-    # ]]
+    # Extracting 044_CastleofDragon_15_16Unused.mid
+    # 045_Castlevania_00_01Prologue_#_1_original.mid
 
-    # data = [
-    #     (
-    #         df[(df.id == "000") & (df.track_name == "GameStart")].iloc[0],
-    #         root_dir
-    #     ),
-    #     (
-    #         df[(df.id == "005") & (df.track_name == "Ending")].iloc[0],
-    #         root_dir
-    #     )
-    # ]
-
-    # proc_one(*data[0])
-    # augmented_data = []
-    # for sample in tqdm(data):
-    #     new_samples = proc_one(*sample)
-    #     augmented_data.extend(new_samples)
-    # run, multi-thread
-    pool = mp.Pool(processes=10) # NOTE: Hardcoded for g15 notebook
-    pool.starmap(generate_tags, data)
 
 
 if __name__ == "__main__":

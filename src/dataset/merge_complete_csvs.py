@@ -49,21 +49,24 @@ def merge_complete_csvs(
     print("Starting glue of {} files".format(len(csv_files)))
     with open("new_csv_files.txt", "w") as f:
         f.write("\n".join(csv_files))
-    exit()
+
     # remove, is not needede anymore
-    base_df.remove(columns=["tempo_bpm", "tempo_conf", "key"], inplace=True)
+    base_df.drop(columns=["tempo_bpm", "tempo_conf", "key"], inplace=True)
+    base_df.insert(loc=9, column="has_vgm", value=True)
     all_frames = [base_df]
     for csv_path in tqdm(csv_files, desc="Merging CSV files", unit="file"):
         df = pd.read_csv(csv_path)
         # Fix
-        df["file_name_prefix"] = os.path.basename(df["file_path_midi"]).replace(".mid", "")
-        df["track_name"] = os.path.dirname(df["file_path_midi"]).split("/")[0]
-        df["duration_s"] = df["duration"]
+        df["file_name_prefix"] = os.path.basename(df["file_path_midi"].values[0]).replace(".mid", "")
+        df["track_name"] = os.path.dirname(df["file_path_midi"].values[0]).split("/")[-1]
+        df["duration_s"] = df["duration"].values[0]
         df["has_music_track_description"] = False
         df["file_path_vgm"] = None
 
-        df.remove(columns=["tempo_bpm", "tempo_conf", "key"], inplace=True)
-        df.remove(columns=["duration", "has_vgm"], inplace=True)
+        df.drop(columns=["tempo_bpm", "tempo_conf", "key"], inplace=True)
+        df.drop(columns=["duration", "has_vgm"], inplace=True)
+
+        df.insert(loc=9, column="has_vgm", value=False)
 
         if set(df.columns) != set(base_df.columns):
             missing = [col for col in base_df.columns if col not in df.columns]
@@ -78,6 +81,7 @@ def merge_complete_csvs(
         all_frames.append(df)
 
     merged_df = pd.concat(all_frames, ignore_index=True, sort=False)
+    merged_df = merged_df.sort_values(by="file_name_prefix", kind="mergesort").reset_index(drop=True)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     merged_df.to_csv(output_file, index=False)
 
@@ -115,3 +119,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
