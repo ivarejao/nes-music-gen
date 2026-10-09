@@ -144,36 +144,42 @@ def feed_pair(metric, name, gt_path, pred_path, captions, needs_text):
 
 def run_metric(metric_name, metric_factory, pairs, captions=None, needs_text=False):
     """
-    Compute the overall score (all files together) AND a per-file score
-    distribution so we can report mean ± std. The GPU is freed afterwards.
+    Computes metric scores.
+    - FAD: Evaluated strictly at dataset-level in a single pass (overall).
+    - KLD / CLAP: Reuses a single loaded model instance to compute mean ± std.
     """
     score_key = METRIC_KEYS[metric_name]
+    m = metric_factory()
 
-    # --- Overall score: feed every pair into one metric instance ---
-    overall_metric = metric_factory()
-    used = 0
-    for name, gt_path, pred_path in pairs:
-        if feed_pair(overall_metric, name, gt_path, pred_path, captions, needs_text):
-            used += 1
-    overall = overall_metric.compute()[score_key] if used else float("nan")
-    free_gpu(overall_metric)
+    # FAD is a distributional metric: evaluate all pairs together in one pass
+    if metric_name == "fad":
+        used = 0
+        for name, gt_path, pred_path in pairs:
+            if feed_pair(m, name, gt_path, pred_path, captions, needs_text):
+                used += 1
+        overall = m.compute()[score_key] if used else float("nan")
+        free_gpu(m)
+        return {"overall": overall, "mean": overall, "std": None, "n": used}
 
-    # --- Per-file scores: fresh metric instance per pair for the std ---
+    # Pairwise metrics (KLD, CLAP): keep model loaded, evaluate each pair once
     per_file = []
     for name, gt_path, pred_path in pairs:
-        m = metric_factory()
-        ok = feed_pair(m, name, gt_path, pred_path, captions, needs_text)
-        if ok:
+        if feed_pair(m, name, gt_path, pred_path, captions, needs_text):
             try:
                 per_file.append(m.compute()[score_key])
             except Exception as e:
                 print(f"[warn] per-file {metric_name} failed for '{name}': {e}")
-        free_gpu(m)
+    free_gpu(m)
 
     mean, std = mean_std(per_file)
-    return {"overall": overall, "mean": mean, "std": std, "n": len(per_file)}
+    return {"overall": mean, "mean": mean, "std": std, "n": len(per_file)}
+
 
 def benchmark(gt_dir, pred_dir, captions_path=None):
+    fad_res = {"overall": 0, "mean": 0, "std": 0, "n": 0} #initialization in case you want to skip any metric
+    kld_res = {"overall": 0, "mean": 0, "std": 0, "n": 0}
+    clap_res = {"overall": 0, "mean": 0, "std": 0, "n": 0}
+
     print("=== Music Generation Benchmark (KLD → FAD → CLAPScore) ===")
     pairs = collect_pairs(gt_dir, pred_dir)
     print(pairs)
@@ -185,15 +191,16 @@ def benchmark(gt_dir, pred_dir, captions_path=None):
 
     print("Computing FAD...")
     fad_res = run_metric("fad", FADMetric, pairs)
-    # kld_res = {"overall": 0.419620, "mean": 0.419620, "std": 0.763889, "n": 332}
-    # fad_res = {"overall": 8.409910, "mean": 36.408385, "std": 33.479918, "n": 332}
     print("Computing CLAPScore...")
     clap_res = run_metric("clap", ClapScoreMetric, pairs, captions=captions, needs_text=True)
-
     print("\n==== RESULTS (overall | per-file mean ± std) ====")
     for label, res in [("KLD ", kld_res), ("FAD ", fad_res), ("CLAP", clap_res)]:
-        print(f"{label}: {res['overall']:.6f} | "
-              f"{res['mean']:.6f} ± {res['std']:.6f}  (n={res['n']})")
+        if res.get("std") is None:
+            print(f"{label}: {res['overall']:.6f}  (dataset-level, n={res['n']})")
+        else:
+            print(f"{label}: {res['overall']:.6f} | "
+                  f"{res['mean']:.6f} ± {res['std']:.6f}  (n={res['n']})")
+
 
     return {"kld": kld_res, "fad": fad_res, "clap": clap_res}
 
@@ -246,11 +253,17 @@ def generate_latex_table(all_results):
     Generates a LaTeX table string from the aggregated benchmark results.
     Expects a dictionary like: {"Audio": {...}, "MIDI": {...}, "NLM": {...}}
     """
-    def fmt(metric_res):
-        # Helper to format "mean \pm std" safely
+    def fmt_pairwise(metric_res):
+        # Helper to format "mean \pm std" safely for pairwise metrics
         if not metric_res or metric_res.get("mean") is None:
             return "---"
         return f"${metric_res['mean']:.4f} \\pm {metric_res['std']:.4f}$"
+
+    def fmt_scalar(metric_res):
+        # Helper to format dataset-level scalar (e.g. FAD) without \pm
+        if not metric_res or metric_res.get("overall") is None:
+            return "---"
+        return f"${metric_res['overall']:.4f}$"
 
     lines = [
         "\\begin{table}[h!]\\centering\\begin{tabular}{l*3c}\\toprule",
@@ -261,10 +274,11 @@ def generate_latex_table(all_results):
     for format_name in ["Audio", "MIDI", "NLM"]:
         if format_name in all_results:
             res = all_results[format_name]
-            kld_str = fmt(res.get("kld"))
-            fad_str = fmt(res.get("fad"))
-            clap_str = fmt(res.get("clap"))
+            kld_str = fmt_pairwise(res.get("kld"))
+            fad_str = fmt_scalar(res.get("fad"))
+            clap_str = fmt_pairwise(res.get("clap"))
             lines.append(f"{format_name} & {kld_str} & {fad_str} & {clap_str} \\\\")
+
 
     lines.append("\\bottomrule\\end{tabular}")
     lines.append("\\caption{Performance Evaluation across multiple formats}\\label{tab:results_generation}\\end{table}")

@@ -221,5 +221,7 @@ __marimo__/
 data/temp_bpe_corpus/
 
 cmd/
-*.out
 *.err
+test_audio_tokenizers/
+test_audio_tokenizers_jamendo/
+
