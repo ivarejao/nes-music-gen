@@ -6,6 +6,7 @@ import random
 import signal
 import sys
 import typing as tp
+from itertools import islice
 
 from tqdm import tqdm
 
@@ -23,7 +24,7 @@ from any2music.audio.decoders.musicgen import MusicGenTransformer, MusicGenSize
 
 logger = logging.getLogger(__name__)
 
-XP_NAME = "xp_audio_nes_dset_v0dot7_from_scratch"
+XP_NAME = "xp_audio_jamendo_12_10_26"
 
 def instantiate_xp(xp_dir):
     xp_folder = os.path.join(xp_dir, XP_NAME)
@@ -96,10 +97,10 @@ def evaluate_model_loss(model, dataloader, criterion, local_rank):
     local_batches = 0
 
     is_master = (local_rank == 0)
-    iterator = tqdm(dataloader, total=len(dataloader), desc="Eval") if is_master else dataloader
+    iterator = tqdm(dataloader, total=500, desc="Eval") if is_master else dataloader
 
     with torch.inference_mode():
-        for batch in iterator:
+        for batch in islice(iterator, 500):
             _, input_tokens, target_tokens, _, txt_tokens, txt_tokens_mask = batch
 
             input_tokens = input_tokens.to(local_rank).long()
@@ -107,7 +108,7 @@ def evaluate_model_loss(model, dataloader, criterion, local_rank):
             txt_tokens_mask = txt_tokens_mask.to(local_rank)
             target_tokens = target_tokens.to(local_rank)
 
-            logits = model(src=txt_tokens, tgt=input_tokens, src_mask=txt_tokens_mask)
+            logits, _ = model(src=txt_tokens, tgt=input_tokens, src_mask=txt_tokens_mask)
             
             flat_logits = logits.reshape(-1, model.module.vocab_size)
             flat_targets = target_tokens.reshape(-1)
@@ -134,33 +135,42 @@ def run_generation_test(test_dataloader, model, audio_tokenizer, generation_fold
     model.eval()
     iter_loader = iter(test_dataloader)
     batch = next(iter_loader)
-    file_name_prefix, _, _, meta, txt_tokens, txt_tokens_mask = batch
+    file_name_prefix, _, _, metas, txt_tokens, txt_tokens_mask = batch
 
-    for i in range(5):
-        conditioner = txt_tokens[i].unsqueeze(0).to(local_rank)
-        conditioner_mask = txt_tokens_mask[i].unsqueeze(0).to(local_rank)
+    conditioners = txt_tokens.to(f"cuda:{local_rank}")
+    conditioner_mask = txt_tokens_mask.to(f"cuda:{local_rank}")
 
-        with torch.inference_mode():
-            logger.info(f"Generating audio tokens for {file_name_prefix[i]}...")
-            
-            audio_tokens = model.module.generate(
-                max_new_tokens=model.module.max_seq_len,
-                src=conditioner,
-                src_mask=conditioner_mask,
-                temperature=2.0,
-                top_k=250,
-                top_p=0.9
-            )
+    with torch.inference_mode():
+        logger.info(f"Generating audio tokens for {file_name_prefix}...")
+        
+        audio_tokens, valid_lengths = model.module.generate(
+            max_new_tokens=model.module.max_seq_len,
+            src=conditioners,
+            src_mask=conditioner_mask,
+            temperature=1.0,
+            top_k=250,
+            top_p=0.8
+        )
 
-            print(f"Generate audio codes shape: {audio_tokens.shape}\n")
+        B = conditioners.shape[0]
+        for b in range(B):
+            print(f"(test_musicgen_t5_dac) Generating audio tokens for {file_name_prefix[b]}...")
 
-            total_generated_samples = audio_tokens.shape[-1] * audio_tokenizer.model.hop_length
-            meta[i]['original_length'] = min(meta[i]['original_length'], total_generated_samples)
-            decoded_audio = audio_tokenizer.decode(audio_tokens.cpu(), meta[i])
+            meta = metas[b]
+            audio_tokens_b = audio_tokens[b].clone().unsqueeze(0)
+            audio_tokens_b = torch.clamp(audio_tokens_b, min=0, max=audio_tokenizer.orig_vocab_size - 1)
 
-            logger.info(f"Rank {local_rank} decoded audio shape: {decoded_audio.shape}")
-            path = os.path.join(generation_folder, file_name_prefix[i]+'.wav')
-            decoded_audio.write(path)
+            valid_samples = valid_lengths[b].item()
+            audio_tokens_b = audio_tokens_b[:, :, :valid_samples]
+            print(f"(test_musicgen_t5_dac) Clean audio codes shape: {audio_tokens_b.shape} | "
+                  f"valid_samples {valid_samples}")
+
+            total_generated_samples = audio_tokens_b.shape[-1] * audio_tokenizer.model.hop_length
+            meta["original_length"] = min(meta["original_length"], total_generated_samples)
+            decoded_audio = audio_tokenizer.decode(audio_tokens_b.cpu(), meta)
+
+            print(f"Decoded audio shape: {decoded_audio.shape}\n")
+            decoded_audio.write(os.path.join(generation_folder, f"{file_name_prefix[b]}.wav"))
 
     model.train()
 
@@ -176,8 +186,9 @@ def _train_audio_worker(
         local_rank: int,
         world_size: int,
         dataset_class,
-        dataset_root: str, 
-        epochs: int, 
+        dataset_root: str,
+        epochs: int,
+        early_stop_patience,
         warmup_steps: int,
         decoder_size: MusicGenSize,
         generate_every: int,
@@ -188,7 +199,7 @@ def _train_audio_worker(
     # Initialize DDP process group for this rank
     if not dist.is_initialized():
         os.environ.setdefault('MASTER_ADDR', '127.0.0.1')
-        os.environ.setdefault('MASTER_PORT', '29500')
+        os.environ.setdefault('MASTER_PORT', '30000') # 30000
         dist.init_process_group(
             backend="nccl",
             init_method="env://",
@@ -280,6 +291,7 @@ def _train_audio_worker(
     train_losses = []
     test_losses = []
     current_epoch = 0
+    epochs_wo_improvement = 0
 
     checkpoint_last_path = os.path.join(checkpoint_folder, f'checkpoint_last.pth')
     checkpoint_best_path = os.path.join(checkpoint_folder, f'checkpoint_best.pth')
@@ -295,6 +307,7 @@ def _train_audio_worker(
         train_losses = ckpt["loss_history"]["train"]
         test_losses = ckpt["loss_history"]["test"]
         current_epoch = ckpt["epoch"] + 1
+        epochs_wo_improvement = ckpt["epochs_wo_improvement"]
 
         if is_master:
             logger.info(f"Loaded checkpoint from {checkpoint_last_path} | Current Epoch: {current_epoch} | Best Test Loss {best_test_loss:.4f}")
@@ -342,7 +355,7 @@ def _train_audio_worker(
                 txt_tokens_mask = txt_tokens_mask.to(local_rank)
 
             optim.zero_grad()
-            logits = model(src=txt_tokens, src_mask=txt_tokens_mask, tgt=input_tokens, drop_conditioning=drop_conditioning)
+            logits, _ = model(src=txt_tokens, src_mask=txt_tokens_mask, tgt=input_tokens, drop_conditioning=drop_conditioning)
 
             flat_logits = logits.reshape(-1, model.module.vocab_size)
             flat_targets = target_tokens.reshape(-1)
@@ -374,14 +387,20 @@ def _train_audio_worker(
             is_best = test_loss <= best_test_loss
             if is_best:
                 best_test_loss = test_loss
+                epochs_wo_improvement = 0
 
             logger.info(f"Epoch {epoch} Train Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f} | Best Test  Loss: {best_test_loss:.4f}")
+
+            if not is_best:
+                epochs_wo_improvement += 1
+                logger.info(f"------> {epochs_wo_improvement} epochs without improvement. Patience is {early_stop_patience}")
 
             ckpt = {
                 "model": model.module.state_dict(),
                 "optim": optim.state_dict(),
                 "scheduler": scheduler.state_dict(),
                 "epoch": epoch,
+                "epochs_wo_improvement": epochs_wo_improvement,
                 "best_test_loss": best_test_loss,
                 "loss_history": {
                     "train": train_losses,
@@ -399,6 +418,20 @@ def _train_audio_worker(
                 os.makedirs(gen_epoch_folder, exist_ok=True)
                 run_generation_test(test_dataloader, model, dac, gen_epoch_folder, local_rank)
 
+        dist.barrier() # Sync after checkpointing
+
+        # Early Stoping
+        stop_flag = torch.zeros(1, device=local_rank)
+        if is_master:
+            if (early_stop_patience > 0) and (epochs_wo_improvement > early_stop_patience):
+                logger.info(f"######################## Early Stoping ########################")
+                stop_flag[0] = 1.0
+
+        dist.broadcast(stop_flag, src=0)
+        if stop_flag.item() == 1.0:
+            dist.barrier()
+            break
+
         dist.barrier()
 
     dist.destroy_process_group()
@@ -406,10 +439,11 @@ def _train_audio_worker(
 
 def train_audio(
         dataset_class,
-        dataset_root: str, 
-        epochs: int, 
+        dataset_root: str,
+        epochs: int,
         warmup_steps: int,
         decoder_size: MusicGenSize,
+        early_stop_patience = -1,
         generate_every: int = -1,
         audio_secs: int = 60,
         continue_from=None,
@@ -429,6 +463,7 @@ def train_audio(
             dataset_class,
             dataset_root,
             epochs,
+            early_stop_patience,
             warmup_steps,
             decoder_size,
             generate_every,
@@ -446,6 +481,7 @@ def train_audio(
                 dataset_class,
                 dataset_root,
                 epochs,
+                early_stop_patience,
                 warmup_steps,
                 decoder_size,
                 generate_every,

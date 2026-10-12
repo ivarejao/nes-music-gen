@@ -3,12 +3,9 @@ import logging
 import random
 import csv
 
-from tqdm import tqdm
-
-import pandas as pd
-
 import torch
-
+import pandas as pd
+from tqdm import tqdm
 from audiotools import AudioSignal
 
 from any2music.audio.decoders.musicgen import DelayProvider
@@ -166,7 +163,8 @@ def tokenize(
             txt_tokens, txt_tokens_mask = t5(txt_tokens)
 
             txt_tokens = txt_tokens.to(torch.bfloat16).cpu().contiguous().squeeze(0).detach()
-            txt_tokens_mask = txt_tokens_mask.bool().cpu().contiguous().squeeze(0).detach()
+            txt_tokens_mask = txt_tokens_mask == 1
+            txt_tokens_mask.cpu().contiguous().squeeze(0).detach()
 
             logger.debug(f"txt_tokens_mask {txt_tokens_mask.shape}\n{txt_tokens_mask}\n")
 
