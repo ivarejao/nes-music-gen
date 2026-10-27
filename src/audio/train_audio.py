@@ -108,12 +108,14 @@ def evaluate_model_loss(model, dataloader, criterion, local_rank):
             txt_tokens_mask = txt_tokens_mask.to(local_rank)
             target_tokens = target_tokens.to(local_rank)
 
-            logits, _ = model(src=txt_tokens, tgt=input_tokens, src_mask=txt_tokens_mask)
-            
-            flat_logits = logits.reshape(-1, model.module.vocab_size)
-            flat_targets = target_tokens.reshape(-1)
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                logits, _ = model(src=txt_tokens, tgt=input_tokens, src_mask=txt_tokens_mask)
+                
+                flat_logits = logits.reshape(-1, model.module.vocab_size)
+                flat_targets = target_tokens.reshape(-1)
 
-            loss = criterion(flat_logits, flat_targets)
+                loss = criterion(flat_logits, flat_targets)
+
             local_loss_sum += loss.item()
             local_batches += 1
 
@@ -140,9 +142,9 @@ def run_generation_test(test_dataloader, model, audio_tokenizer, generation_fold
     conditioners = txt_tokens.to(f"cuda:{local_rank}")
     conditioner_mask = txt_tokens_mask.to(f"cuda:{local_rank}")
 
-    with torch.inference_mode():
+    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         logger.info(f"Generating audio tokens for {file_name_prefix}...")
-        
+
         audio_tokens, valid_lengths = model.module.generate(
             max_new_tokens=model.module.max_seq_len,
             src=conditioners,
@@ -199,7 +201,7 @@ def _train_audio_worker(
     # Initialize DDP process group for this rank
     if not dist.is_initialized():
         os.environ.setdefault('MASTER_ADDR', '127.0.0.1')
-        os.environ.setdefault('MASTER_PORT', '30000') # 30000
+        os.environ.setdefault('MASTER_PORT', '3_010')
         dist.init_process_group(
             backend="nccl",
             init_method="env://",

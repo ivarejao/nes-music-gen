@@ -131,12 +131,13 @@ def evaluate_model_loss(model, dataloader, criterion):
             txt_tokens = txt_tokens.cuda()
             txt_tokens_mask = txt_tokens_mask.cuda()
 
-            logits, _ = model(src=txt_tokens, tgt=input_tokens, src_mask=txt_tokens_mask)
-            flat_logits = logits.reshape(-1, model.vocab_size)
-            flat_targets = target_tokens.cuda().reshape(-1)
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                logits, _ = model(src=txt_tokens, tgt=input_tokens, src_mask=txt_tokens_mask)
+                flat_logits = logits.reshape(-1, model.vocab_size)
+                flat_targets = target_tokens.cuda().reshape(-1)
 
-            loss = criterion(flat_logits, flat_targets)
-            losses.append(loss.item())
+                loss = criterion(flat_logits, flat_targets)
+                losses.append(loss.item())
 
     loss = sum(losses) / len(losses) if losses else float("nan")
     model.train()
@@ -155,7 +156,7 @@ def run_generation_test(test_dataloader, model, generation_folder):
     conditioner_mask = txt_tokens_mask.cuda()
 
     # Run generation
-    with torch.inference_mode():
+    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         tokens, valid_lengths = model.generate(
             max_new_tokens=model.max_seq_len,
             src=conditioners,
