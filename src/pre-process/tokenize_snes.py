@@ -11,7 +11,7 @@ from audiotools import AudioSignal
 from any2music.audio.decoders.musicgen import DelayProvider
 from any2music.text.encoders import T5Conditioner
 from any2music.audio.tokenizers import DACCompressionModel
-from any2music.audio.decoders.musicgen import MusicGenSize, MUSICGEN_SIZES
+from any2music.audio.decoders.musicgen import MusicGenSize
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -70,7 +70,6 @@ def tokenize(
     ):
 
     csv_path = os.path.join(dataset_root, "nes_metadata.csv")
-    size_params = MUSICGEN_SIZES[decoder_size.value]
 
     # Get clean df
     df = pd.read_csv(csv_path, dtype={"id":"object"})
@@ -81,7 +80,9 @@ def tokenize(
     dac = DACCompressionModel.get_pretrained("44khz", device='cuda').eval().cuda()
     dac.set_num_codebooks(4)
 
-    t5 = T5Conditioner('t5-base', size_params.d_model, device='cuda').eval().cuda()
+    # output_dim is desctivated (-1) by default. Because we are using  
+    # a pre-trained T5, we can't initialize a random projection layer
+    t5 = T5Conditioner('t5-base').eval().cuda()
 
     for row in df.to_dict(orient='records'):
         file_name_prefix = row["file_name_prefix"]
@@ -94,7 +95,7 @@ def tokenize(
         input_tokens, target_tokens, meta = tokenize_audio(wav_path, audio_secs, dac)
 
         # Get text tokens
-        with open(desc_file_path, 'r') as f:
+        with open(desc_file_path, 'r', encoding='utf-8') as f:
             file_txt = f.read()
 
         desc_tags = file_txt.split(',')
@@ -125,4 +126,3 @@ def tokenize(
 
 if __name__ == '__main__':
     tokenize()
-

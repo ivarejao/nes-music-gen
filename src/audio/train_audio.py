@@ -24,7 +24,7 @@ from any2music.audio.decoders.musicgen import MusicGenTransformer, MusicGenSize
 
 logger = logging.getLogger(__name__)
 
-XP_NAME = "xp_audio_jamendo_12_10_26"
+XP_NAME = "xp_audio_dset_v0dot8"
 
 def instantiate_xp(xp_dir):
     xp_folder = os.path.join(xp_dir, XP_NAME)
@@ -97,10 +97,10 @@ def evaluate_model_loss(model, dataloader, criterion, local_rank):
     local_batches = 0
 
     is_master = (local_rank == 0)
-    iterator = tqdm(dataloader, total=500, desc="Eval") if is_master else dataloader
+    iterator = tqdm(dataloader, total=1_000, desc="Eval") if is_master else dataloader
 
     with torch.inference_mode():
-        for batch in islice(iterator, 500):
+        for batch in islice(iterator, 1_000):
             _, input_tokens, target_tokens, _, txt_tokens, txt_tokens_mask = batch
 
             input_tokens = input_tokens.to(local_rank).long()
@@ -154,7 +154,7 @@ def run_generation_test(test_dataloader, model, audio_tokenizer, generation_fold
 
         B = conditioners.shape[0]
         for b in range(B):
-            print(f"(test_musicgen_t5_dac) Generating audio tokens for {file_name_prefix[b]}...")
+            print(f"(run_generation_test) Generating audio tokens for {file_name_prefix[b]}...")
 
             meta = metas[b]
             audio_tokens_b = audio_tokens[b].clone().unsqueeze(0)
@@ -162,7 +162,7 @@ def run_generation_test(test_dataloader, model, audio_tokenizer, generation_fold
 
             valid_samples = valid_lengths[b].item()
             audio_tokens_b = audio_tokens_b[:, :, :valid_samples]
-            print(f"(test_musicgen_t5_dac) Clean audio codes shape: {audio_tokens_b.shape} | "
+            print(f"(run_generation_test) Clean audio codes shape: {audio_tokens_b.shape} | "
                   f"valid_samples {valid_samples}")
 
             total_generated_samples = audio_tokens_b.shape[-1] * audio_tokenizer.model.hop_length
@@ -229,12 +229,14 @@ def _train_audio_worker(
     # Instantiate Transformer and wrap in DDP
     model = MusicGenTransformer(
         vocab_size=dac.vocab_size,
-        frame_rate=int(dac.frame_rate),
-        audio_duration=audio_secs,
         pad_token_id=dac.pad_token_id,
         eos_token_id=dac.eos_token_id,
         bos_token_id=dac.bos_token_id,
-        model_size=decoder_size
+        frame_rate=int(dac.frame_rate),
+        audio_duration=audio_secs,
+        conditioner_d_model=768,
+        model_size=decoder_size,
+        dtype=torch.float32
     ).to(local_rank)
 
     model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
@@ -283,7 +285,7 @@ def _train_audio_worker(
     )
 
     # Optimization
-    criterium = torch.nn.CrossEntropyLoss(ignore_index=model.module.pad_token_id)
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=model.module.pad_token_id)
     optim = torch.optim.AdamW(model.parameters(), lr=5e-4, betas=(0.9, 0.95), weight_decay=0.1)
     scheduler = get_cosine_with_warmup_scheduler(optim, warmup_steps, epochs * len(train_dataloader))
 
@@ -355,19 +357,25 @@ def _train_audio_worker(
                 txt_tokens_mask = txt_tokens_mask.to(local_rank)
 
             optim.zero_grad()
-            logits, _ = model(src=txt_tokens, src_mask=txt_tokens_mask, tgt=input_tokens, drop_conditioning=drop_conditioning)
 
-            flat_logits = logits.reshape(-1, model.module.vocab_size)
-            flat_targets = target_tokens.reshape(-1)
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                logits, _ = model(src=txt_tokens, src_mask=txt_tokens_mask, tgt=input_tokens, drop_conditioning=drop_conditioning)
 
-            loss = criterium(flat_logits, flat_targets)
-            loss_item = loss.item()
+                flat_logits = logits.reshape(-1, model.module.vocab_size).float()
+                flat_targets = target_tokens.reshape(-1)
+
+                loss = criterion(flat_logits, flat_targets)
+                loss_item = loss.item()
 
             if is_master:
                 logger.debug(f"Epoch {epoch} -> Update {update} | Loss: {loss_item:.4f}")
             epoch_losses.append(loss_item)
 
             loss.backward()
+
+            # Clip gradients to a max norm of 1.0
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
             optim.step()
             scheduler.step()
 
@@ -377,9 +385,8 @@ def _train_audio_worker(
         epoch_loss = t_epoch_loss.item()
         train_losses.append(epoch_loss)
 
-        test_loss = evaluate_model_loss(model, test_dataloader, criterium, local_rank)
+        test_loss = evaluate_model_loss(model, test_dataloader, criterion, local_rank)
         test_losses.append(test_loss)
-
 
         if is_master:
             save_loss_history(xp_folder, train_losses, test_losses)
@@ -413,17 +420,17 @@ def _train_audio_worker(
                 logger.info(f"Saved BEST checkpoint to {checkpoint_best_path} | Current Epoch: {epoch} | Best Test Loss {test_loss:.4f}")
                 torch.save(ckpt, checkpoint_best_path)
 
-            if generate_every > 0 and epoch % generate_every == 0:
-                gen_epoch_folder = os.path.join(generation_folder, f"epoch_{epoch}")
-                os.makedirs(gen_epoch_folder, exist_ok=True)
-                run_generation_test(test_dataloader, model, dac, gen_epoch_folder, local_rank)
+        if generate_every > 0 and epoch % generate_every == 0:
+            gen_epoch_folder = os.path.join(generation_folder, f"epoch_{epoch}")
+            os.makedirs(gen_epoch_folder, exist_ok=True)
+            run_generation_test(test_dataloader, model, dac, gen_epoch_folder, local_rank)
 
         dist.barrier() # Sync after checkpointing
 
         # Early Stoping
         stop_flag = torch.zeros(1, device=local_rank)
         if is_master:
-            if (early_stop_patience > 0) and (epochs_wo_improvement > early_stop_patience):
+            if (early_stop_patience > 0) and (epochs_wo_improvement >= early_stop_patience):
                 logger.info(f"######################## Early Stoping ########################")
                 stop_flag[0] = 1.0
 

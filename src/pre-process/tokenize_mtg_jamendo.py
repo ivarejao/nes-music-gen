@@ -11,7 +11,7 @@ from audiotools import AudioSignal
 from any2music.audio.decoders.musicgen import DelayProvider
 from any2music.text.encoders import T5Conditioner
 from any2music.audio.tokenizers import DACCompressionModel
-from any2music.audio.decoders.musicgen import MusicGenSize, MUSICGEN_SIZES
+from any2music.audio.decoders.musicgen import MusicGenSize
 from any2music.audio.dataloaders.mtg_jamendo import MTGJamendoDataset
 
 
@@ -125,8 +125,6 @@ def tokenize(
     if not os.path.isdir(save_folder):
         os.makedirs(save_folder, exist_ok=True)
 
-    size_params = MUSICGEN_SIZES[decoder_size.value]
-
     # Get df
     df = pd.read_csv(csv_path)
 
@@ -134,7 +132,9 @@ def tokenize(
     dac = DACCompressionModel.get_pretrained("44khz", device='cuda').eval().cuda()
     dac.set_num_codebooks(4)
 
-    t5 = T5Conditioner('t5-base', size_params.d_model, device='cuda').eval().cuda()
+    # output_dim is desctivated (-1) by default. Because we are using  
+    # a pre-trained T5, we can't initialize a random projection layer
+    t5 = T5Conditioner('t5-base').eval().cuda()
 
     for row in tqdm(df.to_dict(orient='records'), total=len(df), desc=csv_path):
         wav_path = row["path"]

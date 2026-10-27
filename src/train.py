@@ -12,23 +12,23 @@ DATASET_ROOT_NES = "/home/es119256/dados/datasets/nes_dataset"
 DATASET_ROOT_JAMENDO = '/home/es119256/dados/datasets/tokenized_mtg_jamendo'
 
 if __name__ == "__main__":
-    train_audio(
-        dataset_class=MTGJamendoAudioDataset,
-        dataset_root = DATASET_ROOT_JAMENDO,
-        epochs = 70,
-        warmup_steps = 3000,
-        audio_secs = 60,
-        generate_every=10,
-        early_stop_patience=10,
-        decoder_size = MusicGenSize.SMALL
-    )
+    # train_audio(
+    #     dataset_class=MTGJamendoAudioDataset,
+    #     dataset_root=DATASET_ROOT_JAMENDO,
+    #     epochs=70,
+    #     warmup_steps=3000,
+    #     audio_secs=60,
+    #     generate_every=10,
+    #     early_stop_patience=10,
+    #     decoder_size=MusicGenSize.SMALL
+    # )
 
     # train_audio(
     #     dataset_class=NESAudioDataset,
-    #     dataset_root = DATASET_ROOT_NES,
-    #     epochs = 70,
-    #     warmup_steps = 3000,
-    #     audio_secs = 60,
+    #     dataset_root=DATASET_ROOT_NES,
+    #     epochs=70,
+    #     warmup_steps=3000,
+    #     audio_secs=60,
     #     generate_every=10,
     #     early_stop_patience=10,
     #     decoder_size = MusicGenSize.SMALL,
@@ -36,21 +36,21 @@ if __name__ == "__main__":
     # )
 
     # train_symbolic(
-    #     type = SYMBOLIC_TYPE.MIDI,
-    #     dataset_root = DATASET_ROOT_NES,
-    #     epochs = 70,
-    #     warmup_steps = 3000,
+    #     type=SYMBOLIC_TYPE.MIDI,
+    #     dataset_root=DATASET_ROOT_NES,
+    #     epochs=70,
+    #     warmup_steps=3000,
     #     generate_every=10,
     #     early_stop_patience=10,
-    #     decoder_size = MusicGenSize.SMALL
+    #     decoder_size=MusicGenSize.SMALL
     # )
 
-    # train_symbolic(
-    #     type = SYMBOLIC_TYPE.NLM,
-    #     dataset_root = DATASET_ROOT_NES,
-    #     epochs = 70,
-    #     warmup_steps = 3000,
-    #     generate_every=10,
-    #     early_stop_patience=10,
-    #     decoder_size = MusicGenSize.SMALL
-    # )
+    train_symbolic(
+        type=SYMBOLIC_TYPE.NLM,
+        dataset_root=DATASET_ROOT_NES,
+        epochs=70,
+        warmup_steps=3000,
+        generate_every=10,
+        early_stop_patience=10,
+        decoder_size=MusicGenSize.SMALL
+    )

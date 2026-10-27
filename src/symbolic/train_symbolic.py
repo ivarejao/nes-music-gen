@@ -4,6 +4,7 @@ import logging
 import json
 import random
 from enum import Enum
+from itertools import islice
 
 from tqdm import tqdm
 
@@ -24,7 +25,7 @@ class SYMBOLIC_TYPE(Enum):
 logger = logging.getLogger(__name__)
 
 def instantiate_xp(xp_dir, type:SYMBOLIC_TYPE):
-    xp_folder = os.path.join(xp_dir, f"xp_{type.value}_nes_dset_v0dot7")
+    xp_folder = os.path.join(xp_dir, f"xp_{type.value}_nes_dset_v0dot8")
     checkpoint_folder = os.path.join(xp_folder, "checkpoints")
     generation_folder = os.path.join(xp_folder, "generation_tests")
 
@@ -120,15 +121,17 @@ def evaluate_model_loss(model, dataloader, criterion):
     model.eval()
     losses = []
 
+    iterator = tqdm(dataloader, total=1_000, desc="Eval")
+
     with torch.inference_mode():
-        for batch in dataloader:
-            _, input_tokens, target_tokens, txt_tokens, txt_tokens_mask  = batch
+        for batch in islice(iterator, 1_000):
+            _, input_tokens, target_tokens, txt_tokens, txt_tokens_mask = batch
 
             input_tokens = input_tokens.cuda()
             txt_tokens = txt_tokens.cuda()
             txt_tokens_mask = txt_tokens_mask.cuda()
 
-            logits = model(src=txt_tokens, tgt=input_tokens, src_mask=txt_tokens_mask)
+            logits, _ = model(src=txt_tokens, tgt=input_tokens, src_mask=txt_tokens_mask)
             flat_logits = logits.reshape(-1, model.vocab_size)
             flat_targets = target_tokens.cuda().reshape(-1)
 
@@ -146,28 +149,42 @@ def run_generation_test(test_dataloader, model, generation_folder):
     batch = next(iter_loader)
     file_name_prefix, _, _, txt_tokens, txt_tokens_mask = batch
 
-    for i in range(len(file_name_prefix)):
-        conditioner = txt_tokens[i].unsqueeze(0).cuda()
-        conditioner_mask = txt_tokens_mask[i].unsqueeze(0).cuda()
+    logger.info(f"Generating audio tokens for {file_name_prefix}...")
 
-        # Run generation
-        with torch.inference_mode():
-            logger.info(f"Generating audio tokens for {file_name_prefix[i]}...")
-            tokens = model.generate(
-                max_new_tokens=model.max_seq_len,
-                src=conditioner,
-                src_mask=conditioner_mask,
-                temperature=1, # < 1 -> eliminate randomness | = 1 -> the distribution learned | > 1 -> aproximate a uniform distribution
-                top_k=250
-            )
+    conditioners = txt_tokens.cuda()
+    conditioner_mask = txt_tokens_mask.cuda()
 
-            print(f"Generated tokens of shape: {tokens.shape}\n")
+    # Run generation
+    with torch.inference_mode():
+        tokens, valid_lengths = model.generate(
+            max_new_tokens=model.max_seq_len,
+            src=conditioners,
+            src_mask=conditioner_mask,
+            temperature=1,
+            top_k=250,
+            top_p=0.8
+        )
+
+        tokens = tokens.detach().cpu()
+        print(f"Generated tokens of shape: {tokens.shape}\n")
+
+        B = conditioners.shape[0]
+        for b in range(B):
+            print(f"(run_generation_test) Generating audio tokens for {file_name_prefix[b]}...")
 
             # Decode back to audio
-            path = os.path.join(generation_folder, file_name_prefix[i]+'.json')
-            tokens = tokens.detach().cpu()
+            path = os.path.join(generation_folder, file_name_prefix[b]+'.json')
+
+            tokens_b = tokens[b].clone()
+
+            valid_samples = valid_lengths[b].item()
+            tokens_b = tokens_b[:valid_samples]
+
+            print(f"(run_generation_test) Tokens shape: {tokens_b.shape} | "
+                              f"valid_samples {valid_samples}")
+
             with open(path, 'w') as f:
-                json.dump(tokens.tolist(), f)
+                json.dump(tokens_b.tolist(), f)
 
     model.train()
 
@@ -175,9 +192,11 @@ def run_generation_test(test_dataloader, model, generation_folder):
 def train_symbolic(
         type:SYMBOLIC_TYPE,
         dataset_root:str, 
-        epochs:int, 
+        epochs:int,
+        early_stop_patience: int,
         warmup_steps:int,
         decoder_size:TextGenSize,
+        generate_every: int,
         xp_dir = './'
     ):
 
@@ -198,7 +217,9 @@ def train_symbolic(
         bos_token_id = BOS_TKN,
         eos_token_id = EOS_TKN,
         max_seq_len = 6_000,
-        model_size = decoder_size
+        conditioner_d_model=768,
+        model_size = decoder_size,
+        dtype=torch.float32
     ).cuda()
 
     # Get dataloader
@@ -229,7 +250,7 @@ def train_symbolic(
     )
 
     # Train
-    criterium = torch.nn.CrossEntropyLoss(ignore_index=model.pad_token_id) # Ignore the padding tokens in the loss calculation
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=model.pad_token_id) # Ignore the padding tokens in the loss calculation
     optim = torch.optim.AdamW(model.parameters(), lr=5e-4, betas=(0.9, 0.95), weight_decay=0.1)
     scheduler =  get_cosine_with_warmup_scheduler(optim, warmup_steps, epochs*len(train_dataloader))
 
@@ -237,6 +258,7 @@ def train_symbolic(
     train_losses = []
     test_losses = []
     current_epoch = 0
+    epochs_wo_improvement = 0
 
     checkpoint_last_path = os.path.join(checkpoint_folder, f'checkpoint_last.pth')
     checkpoint_best_path = os.path.join(checkpoint_folder, f'checkpoint_best.pth')
@@ -252,6 +274,7 @@ def train_symbolic(
         train_losses = ckpt["loss_history"]["train"]
         test_losses = ckpt["loss_history"]["test"]
         current_epoch = ckpt["epoch"] + 1
+        epochs_wo_improvement = ckpt["epochs_wo_improvement"]
 
         logger.info(f"Loaded checkpoint from {checkpoint_last_path} | Current Epoch: {current_epoch} | Best Test Loss {best_test_loss:.4f}")
 
@@ -277,41 +300,53 @@ def train_symbolic(
                 txt_tokens_mask = txt_tokens_mask.cuda()
 
             optim.zero_grad()
-            logits = model(src=txt_tokens, src_mask=txt_tokens_mask, tgt=input_tokens, drop_conditioning=drop_conditioning)
 
-            # Reshape for CrossEntropyLoss
-            # Logits: (B, K, S, Vocab) -> (B * S, Vocab)
-            # Targets: (B, S) -> (B * S)
-            flat_logits = logits.reshape(-1, model.vocab_size)
-            flat_targets = target_tokens.cuda().long().reshape(-1)
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                logits, _ = model(src=txt_tokens, src_mask=txt_tokens_mask, tgt=input_tokens, drop_conditioning=drop_conditioning)
 
-            # Compute loss and step
-            loss = criterium(flat_logits, flat_targets)
-            loss_item = loss.item()
-            epoch_losses.append(loss_item)
+                # Reshape for CrossEntropyLoss
+                # Logits: (B, S, Vocab) -> (B * S, Vocab)
+                # Targets: (B, S) -> (B * S)
+                flat_logits = logits.reshape(-1, model.vocab_size)
+                flat_targets = target_tokens.cuda().long().reshape(-1)
+
+                # Compute loss and step
+                loss = criterion(flat_logits, flat_targets)
+                loss_item = loss.item()
+                epoch_losses.append(loss_item)
 
             loss.backward()
+
+            # Clip gradients to a max norm of 1.0
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
             optim.step()
             scheduler.step()
 
         epoch_loss = sum(epoch_losses) / len(epoch_losses)
         train_losses.append(epoch_loss)
 
-        test_loss = evaluate_model_loss(model, test_dataloader, criterium)
+        test_loss = evaluate_model_loss(model, test_dataloader, criterion)
         test_losses.append(test_loss)
         save_loss_history(xp_folder, train_losses, test_losses)
 
         is_best = test_loss <= best_test_loss
         if is_best:
             best_test_loss = test_loss
+            epochs_wo_improvement = 0
 
         logger.info(f"Epoch {epoch} Train Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f} | Best Test  Loss: {best_test_loss:.4f}")
+
+        if not is_best:
+            epochs_wo_improvement += 1
+            logger.info(f"------> {epochs_wo_improvement} epochs without improvement. Patience is {early_stop_patience}")
 
         ckpt = {
             "model": model.state_dict(),
             "optim": optim.state_dict(),
             "scheduler": scheduler.state_dict(),
             "epoch": epoch,
+            "epochs_wo_improvement": epochs_wo_improvement,
             "best_test_loss": best_test_loss,
             "loss_history": {
                 "train": train_losses,
@@ -324,3 +359,12 @@ def train_symbolic(
             logger.info(f"Saved BEST checkpoint to {checkpoint_best_path} | Current Epoch: {epoch} | Best Test Loss {test_loss:.4f}")
             ckpt["best_test_loss"] = best_test_loss
             torch.save(ckpt, checkpoint_best_path)
+
+        if generate_every > 0 and epoch % generate_every == 0:
+            gen_epoch_folder = os.path.join(generation_folder, f"epoch_{epoch}")
+            os.makedirs(gen_epoch_folder, exist_ok=True)
+            run_generation_test(test_dataloader, model, gen_epoch_folder)
+
+        if (early_stop_patience > 0) and (epochs_wo_improvement >= early_stop_patience):
+            logger.info(f"######################## Early Stoping ########################")
+            break
