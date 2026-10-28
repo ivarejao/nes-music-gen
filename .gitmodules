@@ -1,3 +1,4 @@
 [submodule "any2music"]
 	path = any2music
 	url = https://github.com/FelipeMarra/any2music.git
+	branch = main
