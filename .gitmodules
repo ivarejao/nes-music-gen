@@ -1,4 +1,0 @@
-[submodule "any2music"]
-	path = any2music
-	url = https://github.com/jcssilveira/any2music.git
-	branch = feat/add-unified-metrics
