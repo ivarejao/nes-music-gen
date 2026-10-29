@@ -121,10 +121,10 @@ def evaluate_model_loss(model, dataloader, criterion):
     model.eval()
     losses = []
 
-    iterator = tqdm(dataloader, total=1_000, desc="Eval")
+    iterator = tqdm(dataloader, total=len(dataloader), desc="Eval")
 
     with torch.inference_mode():
-        for batch in islice(iterator, 1_000):
+        for batch in iterator:
             _, input_tokens, target_tokens, txt_tokens, txt_tokens_mask = batch
 
             input_tokens = input_tokens.cuda()

@@ -15,7 +15,7 @@ if __name__ == "__main__":
         dataset_root=DATASET_ROOT_NES,
         epochs=70,
         warmup_steps=3_000,
-        generate_every=0,
-        early_stop_patience=10,
+        generate_every=10,
+        early_stop_patience=5,
         decoder_size=MusicGenSize.SMALL
     )

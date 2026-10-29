@@ -24,7 +24,7 @@ from any2music.audio.decoders.musicgen import MusicGenTransformer, MusicGenSize
 
 logger = logging.getLogger(__name__)
 
-XP_NAME = "xp_audio_dset_v0dot8"
+XP_NAME = os.environ.get("XP_NAME", "xp_audio_dset_v0dot8")
 
 def instantiate_xp(xp_dir):
     xp_folder = os.path.join(xp_dir, XP_NAME)
@@ -97,7 +97,7 @@ def evaluate_model_loss(model, dataloader, criterion, local_rank):
     local_batches = 0
 
     is_master = (local_rank == 0)
-    iterator = tqdm(dataloader, total=1_000, desc="Eval") if is_master else dataloader
+    iterator = tqdm(dataloader, total=len(dataloader), desc="Eval") if is_master else dataloader
 
     with torch.inference_mode():
         for batch in islice(iterator, 1_000):
@@ -196,7 +196,7 @@ def _train_audio_worker(
         generate_every: int,
         audio_secs: int,
         continue_from: tp.Optional[str],
-        xp_dir: str
+        xp_dir: str,
     ):
     # Initialize DDP process group for this rank
     if not dist.is_initialized():
@@ -318,7 +318,7 @@ def _train_audio_worker(
 
     if current_epoch == 0 and continue_from:
         ckpt = torch.load(continue_from, map_location=f'cuda:{local_rank}', weights_only=False)
-        model.module.load_state_dict(ckpt["model"])
+        model.module.load_state_dict(ckpt["model"], strict=False)
 
         if is_master:
             logger.info(f"Model was initialized with weights from {continue_from}")
@@ -456,7 +456,7 @@ def train_audio(
         generate_every: int = -1,
         audio_secs: int = 60,
         continue_from=None,
-        xp_dir = './'
+        xp_dir = './',
     ):
     visible_gpus = torch.cuda.device_count()
     if visible_gpus == 0:
