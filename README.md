@@ -35,3 +35,13 @@ We explore three distinct pipelines for converting textual prompts into NES-comp
 - Felipe Marra
 - João Santana
 - Lucas Ferreira Nascimento
+
+
+# Notes 
+Running on INFRALAB, set the variables
+```
+UV_PROJECT_ENVIRONMENT=/tmp/...
+UV_LINK_MODE=copy # problem with symlinks on nfs
+UV_CACHE_DIR="/tmp/igor.varejao/uv-cache"
+UV_PYTHON_INSTALL_DIR="/tmp/igor.varejao/uv-python"
+```

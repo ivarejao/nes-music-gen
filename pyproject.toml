@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nes-music-gen"
 version = "0.1.0"
-description = "Add your description here"
+description = "Nes Music generation package for LAMIR 2026 paper"
 readme = "README.md"
-requires-python = ">=3.10.12, <3.14"
+requires-python = ">=3.10.12, <3.11"
 dependencies = [
     "gdown>=6.1.0",
     "librosa>=0.11.0",
@@ -19,9 +19,10 @@ dependencies = [
     "pypianoroll>=1.0.4",
     "requests>=2.34.2",
     "seaborn>=0.13.2",
-    "tokenizers==0.23.1",
+    "tokenizers>=0.22.1",
     "tqdm>=4.67.1",
-]
+    "any2music"
+    ]
 
 [tool.setuptools]
 # Explicitly tell the build system that 'src' is the package
@@ -30,4 +31,27 @@ packages = ["src"]
 [dependency-groups]
 dev = [
     "ipdb>=0.13.13",
+    "ipykernel",
 ]
+
+# this vary between computing instances
+# cu126 was fixed in order to run in GTX 1080Ti
+# source: https://github.com/Comfy-Org/desktop/issues/1300#issuecomment-3269636287
+#         https://docs.astral.sh/uv/guides/integration/pytorch/#using-a-pytorch-index
+[tool.uv.sources]
+any2music = { path = "any2music/", editable = true }
+torch = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux'" },
+]
+torchaudio = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
