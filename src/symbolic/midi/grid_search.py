@@ -97,10 +97,11 @@ def run_generation(test_dataloader, model, step_generation_folder, temp, cfg, to
     batch = next(iter_loader)
     file_name_prefix, _, _, txt_tokens, txt_tokens_mask = batch
 
-    logger.info(f"Generating audio tokens for {file_name_prefix}...")
+    tqdm.write(f"Generating audio tokens for {file_name_prefix}...")
 
     conditioners = txt_tokens.cuda()
     conditioner_mask = txt_tokens_mask.cuda()
+    tqdm.write(f"Param are max_new_tokens={model.max_seq_len}, src={conditioners.shape}, src_mask={conditioner_mask}, temperature={temp}, cfg_scale={cfg}, top_k={top_k}, top_p={top_p}...")
 
     # Run generation
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
@@ -115,23 +116,19 @@ def run_generation(test_dataloader, model, step_generation_folder, temp, cfg, to
         )
 
         tokens = tokens.detach().cpu()
-        print(f"Generated tokens of shape: {tokens.shape}\n")
+        tqdm.write(f"Generated tokens of shape: {tokens.shape}\n")
 
-        B = conditioners.shape[0]
+        B = tokens.shape[0]
         for b in range(B):
-            print(f"(run_generation_test) Generating audio tokens for {file_name_prefix[b]}...")
+            tqdm.write(f"(run_generation_test) Generating audio tokens for {file_name_prefix[b]}...")
 
-            # Decode back to audio
+            valid_len = valid_lengths[b]
+            tokens_b = tokens[b].detach().cpu()[:valid_len]
+
+            tqdm.write(f"(run_generation_test) Tokens shape: {tokens_b.shape} | "
+                              f"valid_samples {valid_len}")
+
             path = os.path.join(step_generation_folder, file_name_prefix[b]+'.json')
-
-            tokens_b = tokens[b].clone()
-
-            valid_samples = valid_lengths[b].item()
-            tokens_b = tokens_b[:valid_samples]
-
-            print(f"(run_generation_test) Tokens shape: {tokens_b.shape} | "
-                              f"valid_samples {valid_samples}")
-
             with open(path, 'w') as f:
                 json.dump(tokens_b.tolist(), f)
 
@@ -143,10 +140,9 @@ def pre_comp_grid_search(dataset_root, decoder_size, search_dir, checkpoint_path
         pad_token_id = PADDING_TKN,
         bos_token_id = BOS_TKN,
         eos_token_id = EOS_TKN,
-        max_seq_len = 6_000,
+        max_seq_len = 1_500,
         conditioner_d_model=768,
         model_size = decoder_size,
-        dtype=torch.float32
     ).cuda()
 
     logger.info(f"Loading checkpoint from {checkpoint_path}")
@@ -161,11 +157,11 @@ def pre_comp_grid_search(dataset_root, decoder_size, search_dir, checkpoint_path
     )
     test_dataloader = DataLoader(
         test_dataset,
-        batch_size=32,
+        batch_size=16,
         shuffle=True,
-        num_workers=8,
+        num_workers=4,
         pin_memory=True,
-        collate_fn=collate,
+        collate_fn=collate
     )
 
     for step in tqdm(STEPS):
