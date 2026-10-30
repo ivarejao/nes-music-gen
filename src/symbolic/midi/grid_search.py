@@ -82,7 +82,7 @@ def run_generation(test_dataloader, model, step_generation_folder, temp, cfg, to
     file_name_prefix, _, _, txt_tokens, txt_tokens_mask = batch
 
     conditioners = txt_tokens.cuda()
-    conditioner_mask = txt_tokens_mask.cuda().bool()
+    conditioner_mask = txt_tokens_mask.cuda()
     
     # Cast numpy to python
     temp = float(temp)
@@ -139,7 +139,7 @@ def pre_comp_grid_search(dataset_root, decoder_size, search_dir, checkpoint_path
         test_dataset,
         batch_size=32,
         shuffle=True,
-        num_workers=2, # Reduced per process to prevent CPU bottleneck
+        num_workers=4,
         pin_memory=True,
         collate_fn=collate
     )

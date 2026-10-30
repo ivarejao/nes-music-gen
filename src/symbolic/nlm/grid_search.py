@@ -101,6 +101,12 @@ def run_generation(test_dataloader, model, step_generation_folder, temp, cfg, to
     conditioners = txt_tokens.cuda()
     conditioner_mask = txt_tokens_mask.cuda()
 
+    # Cast numpy to python
+    temp = float(temp)
+    cfg = float(cfg)
+    top_k = int(top_k)
+    top_p = float(top_p)
+
     # Run generation
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         tokens, valid_lengths = model.generate(
@@ -162,7 +168,7 @@ def pre_comp_grid_search(dataset_root, decoder_size, search_dir, checkpoint_path
         test_dataset,
         batch_size=32,
         shuffle=True,
-        num_workers=8,
+        num_workers=4,
         pin_memory=True,
         collate_fn=collate,
     )
