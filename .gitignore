@@ -219,3 +219,13 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 data/temp_bpe_corpus/
+cmd/
+*.out
+*.err
+*.json
+*.pth
+*.wav
+*.mp3
+*.png
+
+dataset/ 
